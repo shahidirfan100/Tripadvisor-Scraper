@@ -1,0 +1,46 @@
+{
+  "title": "TripAdvisor Hotels Scraper",
+  "description": "Extract hotel listings from TripAdvisor Hotels city and listing URLs with paginated output.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrls": {
+      "title": "TripAdvisor Hotels URLs",
+      "type": "array",
+      "description": "One or more TripAdvisor Hotels city/listing URLs. Best format contains -g<geoId>- in the URL.",
+      "editor": "stringList",
+      "prefill": [
+        "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
+      ]
+    },
+    "results_wanted": {
+      "title": "Maximum listings",
+      "type": "integer",
+      "description": "Maximum number of hotel listings to save across all input URLs.",
+      "minimum": 1,
+      "default": 20,
+      "prefill": 20,
+      "editor": "number"
+    },
+    "max_pages": {
+      "title": "Maximum pages per URL",
+      "type": "integer",
+      "description": "Safety cap for pagination per source URL.",
+      "minimum": 1,
+      "default": 5,
+      "prefill": 5,
+      "editor": "number"
+    },
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Use Apify Proxy for better reliability on protected pages.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": false
+      }
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

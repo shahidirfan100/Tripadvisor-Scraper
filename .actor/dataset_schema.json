@@ -1,0 +1,159 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "item_type": {
+      "title": "Item Type",
+      "type": "string",
+      "description": "Record category."
+    },
+    "source_url": {
+      "title": "Source URL",
+      "type": "string",
+      "description": "TripAdvisor page used for this listing batch."
+    },
+    "geo_id": {
+      "title": "Geo ID",
+      "type": "integer",
+      "description": "TripAdvisor city/geo identifier."
+    },
+    "hotel_result_key": {
+      "title": "Hotel Result Key",
+      "type": "string",
+      "description": "Unique listing key in result set."
+    },
+    "location_id": {
+      "title": "Location ID",
+      "type": "integer",
+      "description": "TripAdvisor hotel location identifier."
+    },
+    "hotel_name": {
+      "title": "Hotel Name",
+      "type": "string",
+      "description": "Hotel name."
+    },
+    "hotel_url": {
+      "title": "Hotel URL",
+      "type": "string",
+      "description": "Absolute hotel detail page URL."
+    },
+    "rating": {
+      "title": "Rating",
+      "type": "number",
+      "description": "Average review score."
+    },
+    "reviews_count": {
+      "title": "Reviews Count",
+      "type": "integer",
+      "description": "Total reviews for the listing."
+    },
+    "ranking_type_text": {
+      "title": "Ranking",
+      "type": "string",
+      "description": "Localized ranking text."
+    },
+    "provider_star_rating": {
+      "title": "Provider Star Rating",
+      "type": "number",
+      "description": "Hotel star rating field from provider metadata."
+    },
+    "accommodation_type": {
+      "title": "Accommodation Type",
+      "type": "string",
+      "description": "Type of stay (for example Hotel)."
+    },
+    "thumbnail_url": {
+      "title": "Thumbnail URL",
+      "type": "string",
+      "description": "Listing image URL."
+    },
+    "lowest_price": {
+      "title": "Lowest Price",
+      "type": "string",
+      "description": "Displayed lowest price text."
+    },
+    "offer_count": {
+      "title": "Offer Count",
+      "type": "integer",
+      "description": "Total offers found for listing."
+    },
+    "available_offer_count": {
+      "title": "Available Offer Count",
+      "type": "integer",
+      "description": "Count of currently available offers."
+    },
+    "full_address": {
+      "title": "Full Address",
+      "type": "string",
+      "description": "Best available full address."
+    },
+    "latitude": {
+      "title": "Latitude",
+      "type": "number",
+      "description": "Hotel latitude."
+    },
+    "longitude": {
+      "title": "Longitude",
+      "type": "number",
+      "description": "Hotel longitude."
+    }
+  },
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "item_type",
+          "hotel_name",
+          "location_id",
+          "rating",
+          "reviews_count",
+          "ranking_type_text",
+          "lowest_price",
+          "hotel_url",
+          "source_url"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "item_type": {
+            "label": "Type",
+            "format": "text"
+          },
+          "hotel_name": {
+            "label": "Hotel",
+            "format": "text"
+          },
+          "location_id": {
+            "label": "Location ID",
+            "format": "text"
+          },
+          "rating": {
+            "label": "Rating",
+            "format": "text"
+          },
+          "reviews_count": {
+            "label": "Reviews",
+            "format": "text"
+          },
+          "ranking_type_text": {
+            "label": "Ranking",
+            "format": "text"
+          },
+          "lowest_price": {
+            "label": "Lowest Price",
+            "format": "text"
+          },
+          "hotel_url": {
+            "label": "Hotel URL",
+            "format": "link"
+          },
+          "source_url": {
+            "label": "Source URL",
+            "format": "link"
+          }
+        }
+      }
+    }
+  }
+}
