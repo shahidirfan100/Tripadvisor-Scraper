@@ -7,11 +7,19 @@ import { gotScraping } from 'got-scraping';
 const DEFAULT_START_URL = 'https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0';
 const TRIPADVISOR_GRAPHQL_ENDPOINT = 'https://www.tripadvisor.com/data/graphql/ids';
-const TRIPADVISOR_HOTELS_QUERY_ID = 'fba19361f0ea0116';
+const KNOWN_TRIPADVISOR_HOTELS_QUERY_IDS = [
+    // Current hotels list query id observed on 2026-04-08.
+    '0ab60f652e82bad6',
+    // Previous id kept for backward compatibility / fallback.
+    'fba19361f0ea0116',
+];
 const DATASET_PUSH_BATCH_SIZE = 100;
 const DEFAULT_LIMIT_PER_PAGE = 30;
 const DEFAULT_SORT = 'BEST_VALUE';
 const DEFAULT_CURRENCY = 'USD';
+const MAX_SCRIPT_URLS_TO_SCAN_FOR_QUERY_IDS = 20;
+const LATEST_HOTELS_QUERY_ID_STORE_KEY = 'LATEST_HOTELS_QUERY_ID';
+const QUERY_ID_ERROR_PATTERN = /Cannot query field|did not contain list payload|persisted query|Unknown query/i;
 
 await Actor.init();
 
@@ -103,6 +111,108 @@ function normalizeStartUrls(input) {
     return [...new Set(output)];
 }
 
+function normalizeTripadvisorScriptUrl(rawUrl) {
+    if (!rawUrl) return undefined;
+    const value = String(rawUrl).trim();
+    if (!value) return undefined;
+    if (value.startsWith('//')) return `https:${value}`;
+    if (value.startsWith('/')) return `https://www.tripadvisor.com${value}`;
+    return value;
+}
+
+function extractScriptUrlsFromHtml(pageHtml) {
+    if (typeof pageHtml !== 'string' || !pageHtml) return [];
+
+    const urls = [];
+    for (const match of pageHtml.matchAll(/<script[^>]+src="([^"]+)"/gi)) {
+        const normalizedUrl = normalizeTripadvisorScriptUrl(match?.[1]);
+        if (normalizedUrl) urls.push(normalizedUrl);
+    }
+
+    return [...new Set(urls)];
+}
+
+function extractPreloadedScriptUrlsFromHtml(pageHtml) {
+    if (typeof pageHtml !== 'string' || !pageHtml) return [];
+
+    const urls = [];
+    for (const match of pageHtml.matchAll(/<link[^>]+as="script"[^>]+href="([^"]+)"/gi)) {
+        const normalizedUrl = normalizeTripadvisorScriptUrl(match?.[1]);
+        if (normalizedUrl) urls.push(normalizedUrl);
+    }
+    for (const match of pageHtml.matchAll(/<link[^>]+href="([^"]+)"[^>]+as="script"/gi)) {
+        const normalizedUrl = normalizeTripadvisorScriptUrl(match?.[1]);
+        if (normalizedUrl) urls.push(normalizedUrl);
+    }
+
+    return [...new Set(urls)];
+}
+
+function extractQueryIdsFromScript(scriptContent) {
+    if (typeof scriptContent !== 'string' || !scriptContent) return [];
+
+    const queryIds = new Set();
+    for (const match of scriptContent.matchAll(/id:"([a-f0-9]{16})"/g)) {
+        if (match?.[1]) queryIds.add(match[1]);
+    }
+    for (const match of scriptContent.matchAll(/preRegisteredQueryId":"([a-f0-9]{16})"/g)) {
+        if (match?.[1]) queryIds.add(match[1]);
+    }
+
+    return [...queryIds];
+}
+
+function extractLikelyHotelsListQueryIdsFromScript(scriptContent) {
+    if (typeof scriptContent !== 'string' || !scriptContent) return [];
+
+    const result = [];
+    const seen = new Set();
+    const declarationRegex = /([A-Za-z_$][A-Za-z0-9_$]*)=\{__key:0x[a-f0-9]+,id:"([a-f0-9]{16})",loc:\{\},definitions:\[\]\}/g;
+
+    for (const match of scriptContent.matchAll(declarationRegex)) {
+        const variableName = match?.[1];
+        const queryId = match?.[2];
+        if (!variableName || !queryId) continue;
+
+        const queryReference = `query:${variableName}`;
+        const referenceIndex = scriptContent.indexOf(queryReference);
+        if (referenceIndex < 0) continue;
+
+        const contextStart = Math.max(0, referenceIndex - 8000);
+        const contextEnd = Math.min(scriptContent.length, referenceIndex + 8000);
+        const context = scriptContent.slice(contextStart, contextEnd);
+
+        const looksLikeHotelsListQuery = (
+            context.includes('data?.list')
+            || context.includes('list?.results')
+            || context.includes('hotelResultKey')
+            || context.includes('loadLocationSEOData')
+            || context.includes('productId:"Hotels"')
+        );
+
+        if (!looksLikeHotelsListQuery || seen.has(queryId)) continue;
+        seen.add(queryId);
+        result.push(queryId);
+    }
+
+    return result;
+}
+
+function uniqueValidQueryIds(queryIds) {
+    const unique = [];
+    const seen = new Set();
+
+    for (const queryId of queryIds) {
+        const normalized = String(queryId || '').trim().toLowerCase();
+        if (!/^[a-f0-9]{16}$/.test(normalized)) continue;
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+        unique.push(normalized);
+    }
+
+    return unique;
+}
+
 async function readJsonFileIfExists(filePath) {
     try {
         const raw = await readFile(filePath, 'utf8');
@@ -115,6 +225,7 @@ async function readJsonFileIfExists(filePath) {
 }
 
 function createGraphqlPayload({
+    queryId,
     geoId,
     offset,
     limit,
@@ -182,7 +293,7 @@ function createGraphqlPayload({
                 requestNumber: 1,
             },
             extensions: {
-                preRegisteredQueryId: TRIPADVISOR_HOTELS_QUERY_ID,
+                preRegisteredQueryId: queryId,
             },
         },
     ];
@@ -276,10 +387,64 @@ async function initializeGraphqlSession({ startUrl, proxyUrl }) {
     return {
         statusCode: response.statusCode,
         cookieHeader: toCookieHeader(response.headers['set-cookie']),
+        pageHtml: typeof response.body === 'string' ? response.body : '',
     };
 }
 
+async function discoverDynamicHotelsQueryIds({ pageHtml, proxyUrl }) {
+    const urlsToScan = [
+        ...extractPreloadedScriptUrlsFromHtml(pageHtml),
+        ...extractScriptUrlsFromHtml(pageHtml),
+    ]
+        .filter((url) => (
+        url.includes('static.tacdn.com/assets/') && /\.js(?:\?|$)/.test(url)
+    ))
+        .filter((url, index, array) => array.indexOf(url) === index)
+        .slice(0, MAX_SCRIPT_URLS_TO_SCAN_FOR_QUERY_IDS);
+
+    if (!urlsToScan.length) return [];
+
+    const likelyIds = [];
+    const fallbackIds = [];
+
+    for (const scriptUrl of urlsToScan) {
+        try {
+            const response = await gotScraping({
+                url: scriptUrl,
+                proxyUrl,
+                timeout: { request: 30000 },
+                throwHttpErrors: false,
+                retry: { limit: 0 },
+                headers: {
+                    'user-agent': DEFAULT_USER_AGENT,
+                    accept: '*/*',
+                    'accept-language': 'en-US,en;q=0.9',
+                },
+            });
+
+            if (response.statusCode >= 400) continue;
+
+            const scriptBody = String(response.body || '');
+            if (!scriptBody.includes('HotelsFusion') || !scriptBody.includes('id:"')) continue;
+
+            for (const queryId of extractLikelyHotelsListQueryIdsFromScript(scriptBody)) {
+                likelyIds.push(queryId);
+            }
+            for (const queryId of extractQueryIdsFromScript(scriptBody)) {
+                fallbackIds.push(queryId);
+            }
+
+            if (likelyIds.length) break;
+        } catch (error) {
+            log.debug(`Skipping script ${scriptUrl}. ${error.message}`);
+        }
+    }
+
+    return uniqueValidQueryIds([...likelyIds, ...fallbackIds]);
+}
+
 async function fetchHotelsPage({
+    queryId,
     startUrl,
     geoId,
     offset,
@@ -292,6 +457,7 @@ async function fetchHotelsPage({
     sessionId,
 }) {
     const payload = createGraphqlPayload({
+        queryId,
         geoId,
         offset,
         limit,
@@ -333,16 +499,74 @@ async function fetchHotelsPage({
 
     const graphqlError = parsedResponse?.[0]?.errors?.[0]?.message;
     if (graphqlError) {
-        throw new Error(`TripAdvisor hotels listing response returned GraphQL error: ${graphqlError}`);
+        throw new Error(`TripAdvisor hotels listing response returned GraphQL error for query ${queryId}: ${graphqlError}`);
     }
 
-    const list = parsedResponse?.[0]?.data?.list || {};
+    const data = parsedResponse?.[0]?.data;
+    if (!data || typeof data !== 'object' || !Object.prototype.hasOwnProperty.call(data, 'list')) {
+        throw new Error(`TripAdvisor hotels listing response did not contain list payload for query ${queryId}.`);
+    }
+
+    const list = data.list || {};
     return {
         results: Array.isArray(list?.results) ? list.results : [],
         isComplete: Boolean(list?.isComplete),
         searchMetadata: list?.searchMetadata,
         searchParameters: list?.searchParameters,
     };
+}
+
+async function resolveHotelsQueryId({
+    startUrl,
+    geoId,
+    sort,
+    currency,
+    proxyUrl,
+    cookieHeader,
+    pageviewId,
+    sessionId,
+    pageHtml,
+    preferredQueryIds = [],
+}) {
+    const tested = [];
+    const discoveredIds = await discoverDynamicHotelsQueryIds({ pageHtml, proxyUrl });
+    const candidateQueryIds = uniqueValidQueryIds([
+        ...preferredQueryIds,
+        ...discoveredIds,
+        ...KNOWN_TRIPADVISOR_HOTELS_QUERY_IDS,
+    ]);
+
+    const tryQueryId = async (queryId) => {
+        try {
+            await fetchHotelsPage({
+                queryId,
+                startUrl,
+                geoId,
+                offset: 0,
+                limit: 1,
+                sort,
+                currency,
+                proxyUrl,
+                cookieHeader,
+                pageviewId,
+                sessionId,
+            });
+            return true;
+        } catch (error) {
+            tested.push({ queryId, error: error.message });
+            return false;
+        }
+    };
+
+    for (const queryId of candidateQueryIds) {
+        if (await tryQueryId(queryId)) return queryId;
+    }
+
+    const summary = tested
+        .slice(-5)
+        .map(({ queryId, error }) => `${queryId}: ${error}`)
+        .join(' | ');
+    throw new Error(`Unable to resolve a working TripAdvisor hotels query id. Recent errors: ${summary}`);
 }
 
 async function runActor() {
@@ -380,6 +604,10 @@ async function runActor() {
     let savedHotels = 0;
     let totalPagesFetched = 0;
     let processedUrls = 0;
+    const hotelsQueryIdsByGeo = {};
+    const storedQueryId = await Actor.getValue(LATEST_HOTELS_QUERY_ID_STORE_KEY);
+    const persistedQueryId = typeof storedQueryId === 'string' ? storedQueryId : undefined;
+    let runResolvedHotelsQueryId;
 
     for (const startUrl of startUrls) {
         if ((savedHotels + pendingData.length) >= resultsWanted) break;
@@ -400,6 +628,26 @@ async function runActor() {
         let offset = 0;
         const pageviewId = crypto.randomUUID();
         const sessionId = crypto.randomUUID().replace(/-/g, '').toUpperCase();
+
+        if (!runResolvedHotelsQueryId) {
+            runResolvedHotelsQueryId = await resolveHotelsQueryId({
+                startUrl,
+                geoId,
+                sort,
+                currency,
+                proxyUrl,
+                cookieHeader: session.cookieHeader,
+                pageviewId,
+                sessionId,
+                pageHtml: session.pageHtml,
+                preferredQueryIds: [persistedQueryId],
+            });
+            await Actor.setValue(LATEST_HOTELS_QUERY_ID_STORE_KEY, runResolvedHotelsQueryId);
+            log.info(`Resolved hotels listing query id for this run: ${runResolvedHotelsQueryId}`);
+        }
+        let hotelsQueryId = runResolvedHotelsQueryId;
+        hotelsQueryIdsByGeo[geoId] = hotelsQueryId;
+
         let lastSearchMetadata;
         let lastSearchParameters;
 
@@ -407,18 +655,55 @@ async function runActor() {
             const remaining = resultsWanted - (savedHotels + pendingData.length);
             const limit = Math.min(limitPerPage, remaining);
 
-            const batch = await fetchHotelsPage({
-                startUrl,
-                geoId,
-                offset,
-                limit,
-                sort,
-                currency,
-                proxyUrl,
-                cookieHeader: session.cookieHeader,
-                pageviewId,
-                sessionId,
-            });
+            let batch;
+            try {
+                batch = await fetchHotelsPage({
+                    queryId: hotelsQueryId,
+                    startUrl,
+                    geoId,
+                    offset,
+                    limit,
+                    sort,
+                    currency,
+                    proxyUrl,
+                    cookieHeader: session.cookieHeader,
+                    pageviewId,
+                    sessionId,
+                });
+            } catch (error) {
+                if (!QUERY_ID_ERROR_PATTERN.test(error.message)) throw error;
+
+                log.warning(`Hotels query id ${hotelsQueryId} failed. Auto-refreshing query id and retrying once.`);
+                hotelsQueryId = await resolveHotelsQueryId({
+                    startUrl,
+                    geoId,
+                    sort,
+                    currency,
+                    proxyUrl,
+                    cookieHeader: session.cookieHeader,
+                    pageviewId,
+                    sessionId,
+                    pageHtml: session.pageHtml,
+                    preferredQueryIds: [hotelsQueryId, runResolvedHotelsQueryId],
+                });
+                runResolvedHotelsQueryId = hotelsQueryId;
+                hotelsQueryIdsByGeo[geoId] = hotelsQueryId;
+                await Actor.setValue(LATEST_HOTELS_QUERY_ID_STORE_KEY, hotelsQueryId);
+
+                batch = await fetchHotelsPage({
+                    queryId: hotelsQueryId,
+                    startUrl,
+                    geoId,
+                    offset,
+                    limit,
+                    sort,
+                    currency,
+                    proxyUrl,
+                    cookieHeader: session.cookieHeader,
+                    pageviewId,
+                    sessionId,
+                });
+            }
 
             const hotels = batch.results;
             lastSearchMetadata = batch.searchMetadata;
@@ -471,6 +756,7 @@ async function runActor() {
             search_total_locations: lastSearchMetadata?.totalLocationsInSearch,
             search_total_full_match: lastSearchMetadata?.totalLocationsFullMatch,
             search_geo_name: lastSearchParameters?.geo?.location?.locationV2?.names?.name,
+            hotels_query_id: hotelsQueryId,
         });
     }
 
@@ -491,7 +777,7 @@ async function runActor() {
         processed_urls: processedUrls,
         sort,
         currency,
-        hotels_query_id: TRIPADVISOR_HOTELS_QUERY_ID,
+        hotels_query_ids_by_geo: hotelsQueryIdsByGeo,
     });
 
     log.info(`Saved ${savedHotels} unique hotel listings.`);

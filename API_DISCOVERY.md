@@ -11,7 +11,7 @@
 - Endpoint: `https://www.tripadvisor.com/data/graphql/ids`
 - Method: `POST`
 - Auth: No API key required
-- Listing query id: `fba19361f0ea0116`
+- Listing query id (current): `0ab60f652e82bad6`
 - Pagination: `offset` + `limit` (effective limit up to 30)
 
 ## Why This API Was Selected
@@ -55,3 +55,4 @@ Compared to the previous review-focused implementation, this listing implementat
 - Direct page request may return DataDome challenge (`HTTP 403`) but still sets cookies.
 - Those cookies are sufficient for listing GraphQL requests in tested runs.
 - Output pipeline compacts records recursively, removing null/empty values before dataset write.
+- Query ID is now auto-resolved on every run (dynamic discovery first, then validated fallback), cached in KV as `LATEST_HOTELS_QUERY_ID`, and auto-refreshed if a mid-run query failure is detected.
