@@ -4,15 +4,15 @@
   "description": "TripAdvisor hotels listing scraper with paginated extraction from city and listing URLs.",
   "type": "module",
   "dependencies": {
-    "apify": "^3.7.0",
+    "apify": "^3.7.2",
     "crawlee": "^3.16.0",
     "cheerio": "^1.2.0",
     "got-scraping": "^4.2.1"
   },
   "devDependencies": {
-    "@apify/eslint-config": "^1.0.0",
-    "eslint": "^9.29.0",
-    "eslint-config-prettier": "^10.1.5",
+    "@apify/eslint-config": "^2.0.6",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.5.3",
     "vitest": "^4.1.0"
   },

@@ -4,55 +4,94 @@
 
 - Domain: `www.tripadvisor.com`
 - Listing page example: `https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html`
-- Discovery scan reference: `https://urlscan.io/result/019d4b7e-dd66-70c2-bafe-35ba9a9da03c/`
 
-## Selected API
+## Problem Observed
+
+- Previous list query IDs (`0ab60f652e82bad6`, `fba19361f0ea0116`) now fail with:
+  - `Cannot query field "marketingText" on type "HPS_WebHLMetaOffer". Did you mean "savingsText"?`
+- This indicates persisted query drift (backend schema evolved, old query documents became incompatible).
+
+## Selected API (Working Replacement)
 
 - Endpoint: `https://www.tripadvisor.com/data/graphql/ids`
 - Method: `POST`
-- Auth: No API key required
-- Listing query id (current): `0ab60f652e82bad6`
-- Pagination: `offset` + `limit` (effective limit up to 30)
+- Primary query id: `32f2e254f7f08a0d`
+- Primary data path: `HPS_getUndatedHotelShelves.shelves`
+- Fallback query id: `6504d9cf4c74d5ae`
+- Fallback data path: `HPS_getHotelsHomeShelves.shelves`
 
-## Why This API Was Selected
-
-- Returns direct JSON: yes
-- Supports pagination: yes (`offset`, `limit`)
-- No key-based authentication: yes
-- Field depth: high (hotel identity, ranking, pricing/offer, contact, geocode, media)
-- Production viability: works with cookie bootstrap from listing page request
-
-## Variables Used
-
-Key variables in request payload:
+## Variables Used (Primary Query)
 
 - `geoId`
-- `offset`
-- `limit`
-- `sort`
 - `currency`
-- `productId: "Hotels"`
-- `viewType: "LIST"`
-- `route.page: "HotelsFusion"`
+- `pageviewId`
+- `sessionId`
+- `deviceType` (`DESKTOP`)
+- `locale` (`en-US`)
+- `requestCaller` (`Hotels`)
+- `requestNumber` (`0`)
 
-## Field Coverage Added
+## Field Coverage
 
-Compared to the previous review-focused implementation, this listing implementation now collects:
+Current mapping from shelf items includes:
 
-- Hotel listing keys and IDs
-- Hotel name and detail URL
-- Rating and review count
-- Ranking text and ranking position metadata
-- Accommodation type and provider star rating
-- Offer counts and lowest visible price
-- Primary provider and primary offer price
-- Address components (street/city/state/country/postal)
-- Latitude/longitude coordinates
-- Thumbnail image URL
+- `location_id`, `hotel_name`, `hotel_url`
+- `lowest_offer`
+- `rating`, `reviews_count`
+- `best_award_type`, `best_award_year`
+- `thumbnail_url`, `thumbnail_caption`, `thumbnail_lang`
+- `shelf_type`, `shelf_title`, `shelf_see_all_url`, shelf/item positions
 
 ## Runtime Notes
 
-- Direct page request may return DataDome challenge (`HTTP 403`) but still sets cookies.
-- Those cookies are sufficient for listing GraphQL requests in tested runs.
-- Output pipeline compacts records recursively, removing null/empty values before dataset write.
-- Query ID is now auto-resolved on every run (dynamic discovery first, then validated fallback), cached in KV as `LATEST_HOTELS_QUERY_ID`, and auto-refreshed if a mid-run query failure is detected.
+- Bootstrap page may return `HTTP 403` with challenge, but cookie bootstrap still allows GraphQL calls.
+- Shelf payload is geo-aware and stable for current schema.
+- This endpoint does not expose old list-page pagination (`offset/limit`) in the same shape; actor now collects from returned shelf buckets and deduplicates records.
+
+## Deep Pagination Review (2026-06-01)
+
+### A. Legacy list pagination query IDs
+
+- Tested IDs: `0ab60f652e82bad6`, `fba19361f0ea0116`
+- Result: both execute but fail with schema error:
+  - `Cannot query field "marketingText" on type "HPS_WebHLMetaOffer". Did you mean "savingsText"?`
+- Conclusion: old `offset/limit` list operation is currently unusable.
+
+### B. Candidate query-id sweep
+
+- Extracted 31 candidate IDs from public scraper references and validated directly against `data/graphql/ids`.
+- Outcomes:
+  - Most candidates: `PersistedQueryNotFound`
+  - One live non-list query: `ef1a9f94012220d3` (`locationId`-required, not city-list pagination)
+  - Two live city-list-adjacent queries: `32f2e254f7f08a0d`, `6504d9cf4c74d5ae`
+
+### C. Request-number / caller matrix on live shelves queries
+
+- For `32f2e254f7f08a0d` with `requestCaller=Hotels`, `requestNumber` from `0..20`:
+  - always `3 shelves`, `22` unique hotels
+- For other callers (`HotelsList`, `HotelsFusion`, `Search`, `Hotel_Review`):
+  - `0` shelves
+- For `6504d9cf4c74d5ae`, `requestNumber` from `0..20`:
+  - always `1 shelf`, `25` unique hotels
+- Cross-query union (same geo):
+  - `22` (undated) + `25` (home) with `1` overlap = `46` unique hotels
+
+### D. URLScan status
+
+- Search API still works for listing scan metadata.
+- Detailed result retrieval and scan submission now require API key in this environment, so discovery relied on live GraphQL validation instead.
+
+## Final Endpoint Strategy
+
+- Keep using `https://www.tripadvisor.com/data/graphql/ids`.
+- Aggregate all successful shelves strategies per page pass:
+  - `HPS_getUndatedHotelShelves` (`32f2e254f7f08a0d`)
+  - `HPS_getHotelsHomeShelves` (`6504d9cf4c74d5ae`)
+- Deduplicate by `location_id` / URL.
+- Stop on repeated stall pages (no new records).
+
+### Verified outcome
+
+- With input `results_wanted=200`, `max_pages=8`, `geoId=293974`:
+  - before strategy aggregation: `22` unique hotels
+  - after strategy aggregation: `46` unique hotels
