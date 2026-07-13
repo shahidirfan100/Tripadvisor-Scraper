@@ -95,6 +95,34 @@
       "title": "Longitude",
       "type": "number",
       "description": "Hotel longitude."
+    },
+    "rating_histogram": {
+      "title": "Rating Histogram",
+      "type": "object",
+      "description": "Review count broken down by star rating (five/four/three/two/one)."
+    },
+    "sub_ratings": {
+      "title": "Sub Ratings",
+      "type": "object",
+      "description": "Category sub-ratings (cleanliness, location, rooms, service, sleepQuality, value)."
+    },
+    "amenities": {
+      "title": "Amenities",
+      "type": "array",
+      "description": "Hotel amenities extracted from the detail page.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hotel_description": {
+      "title": "Hotel Description",
+      "type": "string",
+      "description": "Hotel description from the detail page."
+    },
+    "phone": {
+      "title": "Phone",
+      "type": "string",
+      "description": "Hotel contact phone number."
     }
   },
   "views": {
@@ -109,6 +137,9 @@
           "reviews_count",
           "ranking_type_text",
           "lowest_price",
+          "full_address",
+          "latitude",
+          "longitude",
           "hotel_url",
           "source_url"
         ]
@@ -142,6 +173,18 @@
           },
           "lowest_price": {
             "label": "Lowest Price",
+            "format": "text"
+          },
+          "full_address": {
+            "label": "Address",
+            "format": "text"
+          },
+          "latitude": {
+            "label": "Latitude",
+            "format": "text"
+          },
+          "longitude": {
+            "label": "Longitude",
             "format": "text"
           },
           "hotel_url": {

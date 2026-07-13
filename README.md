@@ -1,15 +1,18 @@
 # TripAdvisor Hotels Scraper
 
-Extract TripAdvisor hotel listing data from city and listing pages into a clean, analytics-ready dataset. Collect ratings, ranking details, pricing signals, address fields, coordinates, and offer highlights at scale. Ideal for travel research, market analysis, and hotel intelligence workflows.
+Extract hotel listings from TripAdvisor city and listing pages into a clean, analytics-ready dataset. Collect hotel names, ratings, review counts, pricing signals, awards, and image metadata at scale. Ideal for travel research, market analysis, and hotel intelligence workflows.
 
 ## Features
 
-- **Hotels listing extraction** — Collect hotel cards from TripAdvisor Hotels pages.
-- **City and listing URL support** — Use one or multiple source URLs in a single run.
-- **Rich hotel fields** — Capture ranking, rating, address, geo coordinates, and pricing/offer details.
-- **Pagination controls** — Set page limit and record limit to control run size.
-- **Null-free output** — Empty values are automatically removed from each dataset item.
-- **Duplicate-safe dataset** — Repeated listings are filtered before save.
+- **Hotel listing extraction** - Collect hotel cards from TripAdvisor Hotels pages.
+- **City and listing URL support** - Use one or multiple source URLs in a single run.
+- **Rich hotel fields** - Capture hotel name, rating, review volume, pricing signals, awards, and thumbnail imagery.
+- **GraphQL enrichment** - Every hotel is enriched with a rating histogram (5/4/3/2/1 star counts), review summary, and category sub-ratings (cleanliness, location, rooms, service, sleep quality, value) via TripAdvisor's persisted GraphQL queries.
+- **Browser detail enrichment** - When a proxy is configured, each hotel detail page is loaded with a headless browser to capture address, latitude/longitude, amenities, star rating, phone, and description.
+- **Shelf and ranking context** - See which curated shelf each hotel appeared in and its position.
+- **Pagination controls** - Set page limit and record limit to control run size.
+- **Null-free output** - Empty values are automatically removed from each dataset item.
+- **Duplicate-safe dataset** - Repeated listings are filtered before save.
 
 ## Use Cases
 
@@ -23,14 +26,14 @@ Build destination-level hotel datasets to understand supply, quality tiers, and 
 Feed listing data into pricing models, recommendation systems, or internal market dashboards.
 
 ### Sales and Lead Enrichment
-Create hotel lead lists with location, contact, and ranking context for outreach and partnership workflows.
+Create hotel lead lists with location, ranking, and review context for outreach and partnership workflows.
 
 ---
 
 ## Input Parameters
 
 | Parameter | Type | Required | Default | Description |
-|---|---|---|---|---|
+|-----------|------|----------|---------|-------------|
 | `startUrls` | String Array | No | Istanbul Hotels sample | One or more TripAdvisor Hotels URLs as plain strings. |
 | `results_wanted` | Integer | No | `20` | Maximum listings to collect across all URLs. |
 | `max_pages` | Integer | No | `5` | Maximum pages to fetch per URL. |
@@ -40,33 +43,50 @@ Create hotel lead lists with location, contact, and ranking context for outreach
 
 ## Output Data
 
-Each dataset item contains only non-empty fields.
+Each dataset item contains only non-empty fields. A typical record includes the fields below; some fields such as `best_award_type` or `thumbnail_caption` appear only when the source provides them.
 
 | Field | Type | Description |
-|---|---|---|
-| `item_type` | String | Record type (`hotel_listing`). |
+|-------|------|-------------|
+| `item_type` | String | Record type (`hotel_shelf_listing`). |
 | `source_url` | String | Source Hotels page URL. |
 | `geo_id` | Integer | TripAdvisor geo identifier used for extraction. |
-| `hotel_result_key` | String | Unique listing key in result set. |
+| `api_variant` | String | Internal listing strategy that produced the record. |
+| `shelf_type` | String | Curated shelf category such as BEST_SELLER. |
+| `shelf_title` | String | Display title of the shelf, when available. |
+| `shelf_is_complete` | Boolean | Whether the shelf returned its full set of items. |
+| `shelf_position` | Integer | Position of the shelf within the page. |
+| `shelf_see_all_url` | String | Link to view all hotels in the shelf. |
+| `listing_position_on_shelf` | Integer | Position of the hotel within its shelf. |
 | `location_id` | Integer | TripAdvisor hotel location ID. |
 | `hotel_name` | String | Hotel name. |
 | `hotel_url` | String | Absolute hotel detail URL. |
+| `lowest_offer` | String | Lowest visible price text. |
 | `rating` | Number | Average rating score. |
 | `reviews_count` | Integer | Total number of reviews. |
-| `ranking_type_text` | String | Localized ranking text. |
-| `provider_star_rating` | Number | Star rating from listing metadata. |
-| `accommodation_type` | String | Accommodation type label. |
-| `lowest_price` | String | Lowest visible price text. |
-| `offer_count` | Integer | Number of offers available. |
-| `available_offer_count` | Integer | Number of currently available offers. |
-| `primary_offer_price` | String | Primary offer display price. |
-| `provider_name` | String | Offer provider name. |
+| `best_award_type` | String | Best-of award type, when the hotel earned one. |
+| `best_award_year` | Integer | Year of the best-of award. |
 | `thumbnail_url` | String | Listing image URL. |
-| `full_address` | String | Full address text. |
-| `city` | String | City from address. |
-| `country` | String | Country from address. |
-| `latitude` | Number | Latitude coordinate. |
-| `longitude` | Number | Longitude coordinate. |
+| `thumbnail_width` | Integer | Native width of the thumbnail image. |
+| `thumbnail_height` | Integer | Native height of the thumbnail image. |
+| `thumbnail_caption` | String | Image caption, when available. |
+| `thumbnail_lang` | String | Language code of the thumbnail metadata. |
+| `parent_geo_name` | String | Parent geographic area, when available. |
+| `rating_histogram` | Object | Review count by star rating (five/four/three/two/one). Added by GraphQL enrichment. |
+| `sub_ratings` | Object | Category sub-ratings (cleanliness, location, rooms, service, sleepQuality, value). Added by GraphQL enrichment. |
+| `full_address` | String | Street address from the hotel detail page. Added when browser enrichment runs (requires proxy). |
+| `latitude` | Number | Hotel latitude. Added when browser enrichment runs (requires proxy). |
+| `longitude` | Number | Hotel longitude. Added when browser enrichment runs (requires proxy). |
+| `provider_star_rating` | Number | Provider star rating from the detail page. Added when browser enrichment runs (requires proxy). |
+| `amenities` | Array | Hotel amenities from the detail page. Added when browser enrichment runs (requires proxy). |
+| `hotel_description` | String | Hotel description. Added when browser enrichment runs (requires proxy). |
+| `phone` | String | Hotel contact phone. Added when browser enrichment runs (requires proxy). |
+
+---
+
+## Enrichment Layers
+
+- **GraphQL (always on)** - After collecting hotel cards, the actor calls TripAdvisor's persisted GraphQL queries per hotel to attach the rating histogram, review summary, and sub-ratings. No browser or proxy required.
+- **Browser detail (proxy required)** - When `proxyConfiguration` is set, the actor launches a headless Chromium browser (via Playwright) and loads each hotel detail page to parse hidden `application/ld+json` data plus amenity/ranking/price elements. Without a proxy the browser layer is skipped and the run still succeeds with the GraphQL-enriched fields only.
 
 ---
 
@@ -76,10 +96,10 @@ Each dataset item contains only non-empty fields.
 
 ```json
 {
-  "startUrls": [
-    "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
-  ],
-  "results_wanted": 20
+    "startUrls": [
+        "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
+    ],
+    "results_wanted": 20
 }
 ```
 
@@ -87,12 +107,12 @@ Each dataset item contains only non-empty fields.
 
 ```json
 {
-  "startUrls": [
-    "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html",
-    "https://www.tripadvisor.com/Hotels-g294226-Dubai_Emirate_of_Dubai-Hotels.html"
-  ],
-  "results_wanted": 120,
-  "max_pages": 10
+    "startUrls": [
+        "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html",
+        "https://www.tripadvisor.com/Hotels-g294226-Dubai_Emirate_of_Dubai-Hotels.html"
+    ],
+    "results_wanted": 120,
+    "max_pages": 10
 }
 ```
 
@@ -100,11 +120,11 @@ Each dataset item contains only non-empty fields.
 
 ```json
 {
-  "startUrls": [
-    "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
-  ],
-  "results_wanted": 50,
-  "max_pages": 8
+    "startUrls": [
+        "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
+    ],
+    "results_wanted": 50,
+    "max_pages": 8
 }
 ```
 
@@ -114,29 +134,27 @@ Each dataset item contains only non-empty fields.
 
 ```json
 {
-  "item_type": "hotel_listing",
-  "source_url": "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html",
-  "geo_id": 293974,
-  "hotel_result_key": "12395785:s:MzM0ODMyMTU:1b0deade-0273-42a8-bdba-521b02fba032",
-  "location_id": 12395785,
-  "hotel_name": "ibis Istanbul Tuzla Hotel",
-  "hotel_url": "https://www.tripadvisor.com/Hotel_Review-g293974-d12395785-Reviews-Ibis_Istanbul_Tuzla_Hotel-Istanbul.html",
-  "rating": 4.2,
-  "reviews_count": 151,
-  "ranking_type_text": "#594 of 2,504 hotels in Istanbul",
-  "provider_star_rating": 3,
-  "accommodation_type": "Hotel",
-  "lowest_price": "$65",
-  "offer_count": 1,
-  "available_offer_count": 1,
-  "primary_offer_price": "$65",
-  "provider_name": "all.accor.com",
-  "thumbnail_url": "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/27/be/43/7b/ibis-istanbul-tuzla-hotel.jpg?w=1200&h=800&s=1",
-  "full_address": "Aydintepe Mah.selin Sok.no.7 Tuzla, Istanbul 34947 Türkiye",
-  "city": "Istanbul",
-  "country": "Türkiye",
-  "latitude": 40.848927,
-  "longitude": 29.296696
+    "item_type": "hotel_shelf_listing",
+    "source_url": "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html",
+    "geo_id": 293974,
+    "api_variant": "HPS_getUndatedHotelShelves",
+    "shelf_type": "BEST_SELLER",
+    "shelf_is_complete": false,
+    "shelf_position": 1,
+    "shelf_see_all_url": "https://www.tripadvisor.com/ClientLink?value=dWhyXy9Ib3RlbHMtZzI5Mzk3NC1hX3NvcnQuUE9QVUxBUklUWS1Jc3RhbmJ1bC1Ib3RlbHMuaHRtbF8wemk%3D",
+    "listing_position_on_shelf": 2,
+    "location_id": 4990603,
+    "hotel_name": "Golden Horn Bosphorus Hotel",
+    "hotel_url": "https://www.tripadvisor.com/Hotel_Review-g293974-d4990603-Reviews-Golden_Horn_Bosphorus_Hotel-Istanbul.html",
+    "lowest_offer": "$113",
+    "rating": 5,
+    "reviews_count": 700,
+    "best_award_type": "BOTB",
+    "best_award_year": 2026,
+    "thumbnail_url": "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2d/3c/fa/12/caption.jpg?w=1200&h=800&s=1",
+    "thumbnail_width": 6757,
+    "thumbnail_height": 5464,
+    "thumbnail_lang": "en"
 }
 ```
 
@@ -158,22 +176,40 @@ Each dataset item contains only non-empty fields.
 
 ---
 
+## Proxy Configuration
+
+For reliable results on protected pages, residential proxies are recommended:
+
+```json
+{
+    "proxyConfiguration": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
+    }
+}
+```
+
+---
+
 ## Integrations
 
-Connect your dataset with:
+Connect your data with:
 
-- **Google Sheets** — Share listing snapshots with business teams.
-- **Airtable** — Build searchable hotel intelligence bases.
-- **Make** — Automate recurring enrichment workflows.
-- **Zapier** — Trigger actions from fresh listing runs.
-- **Webhooks** — Push records into custom pipelines.
+- **Google Sheets** - Export for analysis.
+- **Airtable** - Build searchable databases.
+- **Slack** - Get notifications.
+- **Webhooks** - Send to custom endpoints.
+- **Make** - Create automated workflows.
+- **Zapier** - Trigger actions.
 
 ### Export Formats
 
-- **JSON** — Best for automation and downstream processing.
-- **CSV** — Best for spreadsheet analysis.
-- **Excel** — Best for business reporting.
-- **XML** — Best for legacy systems.
+Download data in multiple formats:
+
+- **JSON** - For developers and APIs.
+- **CSV** - For spreadsheet analysis.
+- **Excel** - For business reporting.
+- **XML** - For system integrations.
 
 ---
 
@@ -190,6 +226,9 @@ Listings are deduplicated by listing identifiers before saving.
 
 ### What URL format should I use?
 Use a TripAdvisor Hotels URL that includes `-g<geoId>-`, such as city listing pages.
+
+### What fields can be missing from a record?
+Some fields are optional in the source, such as `best_award_type`, `thumbnail_caption`, or `parent_geo_name`. They appear only when the hotel provides them.
 
 ### How can I reduce blocked runs?
 Use Apify residential proxies and start with smaller collection sizes.

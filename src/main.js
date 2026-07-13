@@ -2,13 +2,15 @@ import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { Actor, log } from 'apify';
-import { gotScraping } from 'got-scraping';
+import { Impit } from 'impit';
 
 const DEFAULT_START_URL = 'https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html';
-const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0';
 const TRIPADVISOR_GRAPHQL_ENDPOINT = 'https://www.tripadvisor.com/data/graphql/ids';
 const UNDATED_SHELVES_QUERY_ID = '32f2e254f7f08a0d';
 const HOME_SHELVES_QUERY_ID = '6504d9cf4c74d5ae';
+const RATING_HISTOGRAM_QUERY_ID = 'b6d4e00c5b27f98e';
+const SUBRATINGS_QUERY_ID = '6d1d0d458eddcc5f';
+const CHROME_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const DATASET_PUSH_BATCH_SIZE = 100;
 const DEFAULT_CURRENCY = 'USD';
 const DEFAULT_LOCALE = 'en-US';
@@ -23,7 +25,41 @@ const REQUEST_RETRY_OPTIONS = {
     errorCodes: ['ETIMEDOUT', 'ECONNRESET', 'EADDRINUSE', 'ECONNREFUSED', 'EPIPE', 'ENOTFOUND', 'ENETUNREACH', 'EAI_AGAIN'],
 };
 
+async function fetchWithRetry(client, url, options = {}) {
+    const maxAttempts = REQUEST_RETRY_OPTIONS.limit + 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+            const response = await client.fetch(url, options);
+
+            if (REQUEST_RETRY_OPTIONS.statusCodes.includes(response.status)) {
+                if (attempt === maxAttempts) return response;
+                const wait = Math.min(attempt * 2000 + Math.random() * 1000, 10000);
+                log.warning(`HTTP ${response.status}, retrying in ${Math.round(wait / 1000)}s (attempt ${attempt}/${maxAttempts})`);
+                await new Promise((r) => { setTimeout(r, wait); });
+                continue;
+            }
+
+            return response;
+        } catch (error) {
+            if (attempt === maxAttempts) throw error;
+            const wait = Math.min(attempt * 1000 + Math.random() * 500, 5000);
+            log.warning(`Request failed (${error.message}), retrying in ${Math.round(wait / 1000)}s`);
+            await new Promise((r) => { setTimeout(r, wait); });
+        }
+    }
+    throw new Error(`All ${maxAttempts} retries failed for ${url}`);
+}
+
 await Actor.init();
+
+function buildRandomRequestedBy(length = 180) {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let value = '';
+    for (let i = 0; i < length; i++) {
+        value += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return value;
+}
 
 function compactValue(value) {
     if (value === null || value === undefined) return undefined;
@@ -251,23 +287,12 @@ async function readJsonFileIfExists(filePath) {
     }
 }
 
-async function initializeSessionCookies({ startUrl, proxyUrl }) {
-    const response = await gotScraping({
-        url: startUrl,
-        proxyUrl,
-        timeout: { request: 30000 },
-        throwHttpErrors: false,
-        retry: REQUEST_RETRY_OPTIONS,
-        headers: {
-            'user-agent': DEFAULT_USER_AGENT,
-            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'accept-language': `${DEFAULT_LOCALE},en;q=0.9`,
-        },
-    });
+async function initializeSessionCookies({ startUrl, client }) {
+    const response = await fetchWithRetry(client, startUrl);
 
     return {
-        statusCode: response.statusCode,
-        cookieHeader: toCookieHeader(response.headers['set-cookie']),
+        statusCode: response.status,
+        cookieHeader: toCookieHeader(response.headers.getSetCookie()),
         resolvedUrl: response.url || startUrl,
     };
 }
@@ -310,33 +335,26 @@ function buildHomeShelvesPayload({ queryId, requestNumber }) {
     ];
 }
 
-async function fetchShelves({ startUrl, proxyUrl, cookieHeader, payload }) {
-    const response = await gotScraping({
-        url: TRIPADVISOR_GRAPHQL_ENDPOINT,
+async function fetchShelves({ startUrl, client, cookieHeader, payload }) {
+    const response = await fetchWithRetry(client, TRIPADVISOR_GRAPHQL_ENDPOINT, {
         method: 'POST',
-        proxyUrl,
-        timeout: { request: 30000 },
-        throwHttpErrors: false,
-        retry: REQUEST_RETRY_OPTIONS,
         headers: {
-            'user-agent': DEFAULT_USER_AGENT,
-            accept: '*/*',
             'content-type': 'application/json',
             origin: 'https://www.tripadvisor.com',
             referer: startUrl,
-            'x-requested-by': 'tripadvisor.com',
+            'x-requested-by': buildRandomRequestedBy(),
             ...(cookieHeader ? { cookie: cookieHeader } : {}),
         },
         body: JSON.stringify(payload),
     });
 
-    if (response.statusCode >= 400) {
-        throw new Error(`TripAdvisor shelves request failed with HTTP ${response.statusCode}`);
+    if (response.status >= 400) {
+        throw new Error(`TripAdvisor shelves request failed with HTTP ${response.status}`);
     }
 
     let parsedResponse;
     try {
-        parsedResponse = JSON.parse(response.body);
+        parsedResponse = await response.json();
     } catch (error) {
         throw new Error(`Could not parse TripAdvisor shelves response JSON: ${error.message}`);
     }
@@ -358,7 +376,7 @@ async function fetchShelves({ startUrl, proxyUrl, cookieHeader, payload }) {
     throw new Error('TripAdvisor response did not contain shelf listings.');
 }
 
-async function fetchShelvesAcrossStrategies({ startUrl, proxyUrl, cookieHeader, geoId, requestNumber }) {
+async function fetchShelvesAcrossStrategies({ startUrl, client, cookieHeader, geoId, requestNumber }) {
     const strategies = [
         {
             queryId: UNDATED_SHELVES_QUERY_ID,
@@ -376,7 +394,7 @@ async function fetchShelvesAcrossStrategies({ startUrl, proxyUrl, cookieHeader, 
         try {
             const shelvesResponse = await fetchShelves({
                 startUrl,
-                proxyUrl,
+                client,
                 cookieHeader,
                 payload: strategy.buildPayload(),
             });
@@ -402,7 +420,9 @@ function mapShelfItem({ startUrl, geoId, apiVariant, shelf, shelfIndex, item, it
     const reviewSummary = location?.reviewSummary?.responseData || {};
     const photo = location?.thumbnail?.photo || {};
     const photoTemplate = photo?.photoSizeDynamic?.urlTemplate;
+    const photoSize = photo?.photoSizeDynamic || {};
     const award = location?.bestAwardForActiveYear || {};
+    const parentGeo = detail?.parentGeo?.detail?.info;
 
     return compactRecord({
         item_type: 'hotel_shelf_listing',
@@ -424,9 +444,192 @@ function mapShelfItem({ startUrl, geoId, apiVariant, shelf, shelfIndex, item, it
         best_award_type: award?.awardType,
         best_award_year: award?.year,
         thumbnail_url: convertPhotoTemplateToAbsoluteUrl(photoTemplate),
+        thumbnail_width: photoSize?.maxWidth,
+        thumbnail_height: photoSize?.maxHeight,
         thumbnail_caption: photo?.caption,
         thumbnail_lang: photo?.lang,
+        parent_geo_name: parentGeo?.localizedName,
     });
+}
+
+async function fetchGraphql(client, cookieHeader, startUrl, queries) {
+    const response = await fetchWithRetry(client, TRIPADVISOR_GRAPHQL_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+            origin: 'https://www.tripadvisor.com',
+            referer: startUrl,
+            'x-requested-by': buildRandomRequestedBy(),
+            ...(cookieHeader ? { cookie: cookieHeader } : {}),
+        },
+        body: JSON.stringify(queries),
+    });
+
+    if (response.status >= 400) {
+        throw new Error(`TripAdvisor GraphQL enrichment request failed with HTTP ${response.status}`);
+    }
+
+    return response.json();
+}
+
+async function fetchHotelEnrichment({ client, cookieHeader, startUrl, locationIds }) {
+    const result = new Map();
+    for (const id of locationIds) result.set(Number(id), {});
+
+    const BATCH_SIZE = 25;
+    for (let i = 0; i < locationIds.length; i += BATCH_SIZE) {
+        const slice = locationIds.slice(i, i + BATCH_SIZE);
+        const queries = [];
+        for (const id of slice) {
+            queries.push({
+                variables: { locationId: Number(id) },
+                extensions: { preRegisteredQueryId: RATING_HISTOGRAM_QUERY_ID },
+            });
+            queries.push({
+                variables: { locationId: Number(id) },
+                extensions: { preRegisteredQueryId: SUBRATINGS_QUERY_ID },
+            });
+        }
+
+        let parsed;
+        try {
+            parsed = await fetchGraphql(client, cookieHeader, startUrl, queries);
+        } catch (error) {
+            log.warning(`Hotel GraphQL enrichment batch failed: ${error.message}`);
+            continue;
+        }
+
+        const items = Array.isArray(parsed) ? parsed : [];
+        for (let k = 0; k < slice.length; k++) {
+            const id = Number(slice[k]);
+            const histogramItem = items[2 * k];
+            const subratingsItem = items[2 * k + 1];
+            const target = result.get(id);
+            if (!target) continue;
+
+            const histogramError = histogramItem?.errors?.[0]?.message;
+            if (!histogramError) {
+                const ratingCounts = histogramItem?.data?.locations?.[0]?.reviewAggregations?.ratingCounts;
+                if (Array.isArray(ratingCounts) && ratingCounts.length === 5) {
+                    target.ratingHistogram = {
+                        five: ratingCounts[4],
+                        four: ratingCounts[3],
+                        three: ratingCounts[2],
+                        two: ratingCounts[1],
+                        one: ratingCounts[0],
+                    };
+                }
+                const summary = histogramItem?.data?.reviewSummaryInfo?.[0]?.responseData;
+                if (summary && (summary.rating != null || summary.count != null)) {
+                    target.reviewSummary = { rating: summary.rating ?? null, count: summary.count ?? null };
+                }
+            }
+
+            const subratingsError = subratingsItem?.errors?.[0]?.message;
+            if (!subratingsError) {
+                const subRatings = subratingsItem?.data?.hotelSubratingsData?.[0]?.subRatings;
+                if (subRatings && typeof subRatings === 'object') {
+                    target.subRatings = subRatings;
+                }
+            }
+        }
+    }
+
+    return result;
+}
+
+function extractHotelDetailFromPage() {
+    const out = {};
+    const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+    for (const script of scripts) {
+        try {
+            const parsed = JSON.parse(script.textContent || '{}');
+            const root = Array.isArray(parsed) ? parsed[0] : parsed;
+            const node = root?.['@graph'] ? root['@graph'].find((n) => n?.address || n?.geo) : root;
+            if (!node) continue;
+
+            if (node.geo?.latitude != null && node.geo?.longitude != null) {
+                out.latitude = Number(node.geo.latitude);
+                out.longitude = Number(node.geo.longitude);
+            }
+            if (node.address) {
+                const a = node.address;
+                if (typeof a === 'string') {
+                    out.full_address = a;
+                } else {
+                    const parts = [a.streetAddress, a.addressLocality, a.addressRegion, a.postalCode, a.addressCountry]
+                        .filter(Boolean)
+                        .map(String);
+                    if (parts.length) out.full_address = parts.join(', ');
+                }
+            }
+            if (node.starRating?.ratingValue != null) out.provider_star_rating = Number(node.starRating.ratingValue);
+            if (node.telephone) out.phone = String(node.telephone);
+            if (node.description) out.hotel_description = String(node.description);
+            if (node['@type'] === 'Hotel') out.accommodation_type = 'Hotel';
+        } catch {
+            // ignore malformed JSON-LD blocks
+        }
+    }
+
+    const amenityEls = document.querySelectorAll('[data-test-target="amenity"], [class*="amenity"], [class*="Amenity"]');
+    const amenities = Array.from(amenityEls)
+        .map((el) => (el.textContent || '').trim())
+        .filter(Boolean);
+    if (amenities.length) out.amenities = [...new Set(amenities)];
+
+    const rankingEl = document.querySelector('[data-test-target="ranking"], .biGQsF');
+    if (rankingEl?.textContent) out.ranking_type_text = rankingEl.textContent.trim();
+
+    const priceEl = document.querySelector('[data-test-target="price-text"], [class*="price"], [class*="Price"]');
+    if (priceEl?.textContent) out.lowest_price = priceEl.textContent.trim();
+
+    return out;
+}
+
+async function enrichHotelsViaBrowser(hotels, proxyUrl) {
+    let chromium;
+    try {
+        ({ chromium } = await import('playwright'));
+    } catch (error) {
+        log.warning(`Playwright is not installed; skipping browser-based rich detail. ${error.message}`);
+        return;
+    }
+
+    let browser;
+    try {
+        browser = await chromium.launch({
+            headless: true,
+            proxy: proxyUrl ? { server: proxyUrl } : undefined,
+        });
+    } catch (error) {
+        log.warning(`Could not launch browser for rich detail; skipping. ${error.message}`);
+        return;
+    }
+
+    try {
+        for (const hotel of hotels) {
+            const url = hotel.hotel_url;
+            if (!url) continue;
+
+            const context = await browser.newContext({ userAgent: CHROME_USER_AGENT, locale: 'en-US' });
+            const page = await context.newPage();
+            page.setDefaultTimeout(30000);
+            try {
+                await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+                await page.waitForSelector('script[type="application/ld+json"]', { timeout: 15000 }).catch(() => {});
+                await page.waitForTimeout(2000);
+                const detail = await page.evaluate(extractHotelDetailFromPage);
+                Object.assign(hotel, compactRecord(detail));
+            } catch (error) {
+                log.warning(`Browser detail extraction failed for ${url}: ${error.message}`);
+            } finally {
+                await context.close();
+            }
+        }
+    } finally {
+        await browser.close().catch(() => {});
+    }
 }
 
 async function runActor() {
@@ -454,6 +657,12 @@ async function runActor() {
         }
     }
 
+    const client = new Impit({
+        browser: 'chrome',
+        ignoreTlsErrors: true,
+        ...(proxyUrl && { proxyUrl }),
+    });
+
     const urlQueue = [...startUrls];
     const queuedUrls = new Set(urlQueue.map((url) => url.toLowerCase()));
     const geoHintByUrl = new Map();
@@ -475,7 +684,7 @@ async function runActor() {
         processedUrls += 1;
         let session;
         try {
-            session = await initializeSessionCookies({ startUrl, proxyUrl });
+            session = await initializeSessionCookies({ startUrl, client });
         } catch (error) {
             log.warning(`Session bootstrap failed for URL=${startUrl}. Continuing without cookies. ${error.message}`);
             session = { statusCode: 0, cookieHeader: undefined, resolvedUrl: startUrl };
@@ -495,15 +704,16 @@ async function runActor() {
             log.warning(`No bootstrap cookies for geoId=${geoId}. Continuing anyway.`);
         }
 
+        const urlHotels = [];
         let stalledPages = 0;
         for (let pageNumber = 0; pageNumber < maxPagesInput; pageNumber++) {
-            if ((savedHotels + pendingData.length) >= resultsWanted) break;
+            if ((savedHotels + pendingData.length + urlHotels.length) >= resultsWanted) break;
 
             let strategyResult;
             try {
                 strategyResult = await fetchShelvesAcrossStrategies({
                     startUrl,
-                    proxyUrl,
+                    client,
                     cookieHeader,
                     geoId,
                     requestNumber: pageNumber,
@@ -568,19 +778,14 @@ async function runActor() {
                         seenHotels.add(String(dedupKey));
                         newItemsThisPage += 1;
 
-                        pendingData.push(mappedHotel);
-                        if (pendingData.length >= DATASET_PUSH_BATCH_SIZE) {
-                            await Actor.pushData(pendingData);
-                            savedHotels += pendingData.length;
-                            pendingData = [];
-                        }
+                        urlHotels.push(mappedHotel);
 
-                        if ((savedHotels + pendingData.length) >= resultsWanted) break;
+                        if ((savedHotels + pendingData.length + urlHotels.length) >= resultsWanted) break;
                     }
 
-                    if ((savedHotels + pendingData.length) >= resultsWanted) break;
+                    if ((savedHotels + pendingData.length + urlHotels.length) >= resultsWanted) break;
                 }
-                if ((savedHotels + pendingData.length) >= resultsWanted) break;
+                if ((savedHotels + pendingData.length + urlHotels.length) >= resultsWanted) break;
             }
 
             if (newItemsThisPage === 0) {
@@ -589,6 +794,60 @@ async function runActor() {
                 if (stalledPages >= PAGE_STALL_THRESHOLD) break;
             } else {
                 stalledPages = 0;
+            }
+        }
+
+        if (!urlHotels.length) {
+            log.info(`No hotels collected for ${startUrl}.`);
+        } else {
+            const enrichmentIds = [...new Set(
+                urlHotels
+                    .map((hotel) => hotel.location_id)
+                    .filter((id) => Number.isFinite(Number(id)))
+                    .map(Number),
+            )];
+
+            if (enrichmentIds.length) {
+                try {
+                    const enrichment = await fetchHotelEnrichment({
+                        client,
+                        cookieHeader,
+                        startUrl,
+                        locationIds: enrichmentIds,
+                    });
+                    for (const hotel of urlHotels) {
+                        const data = enrichment.get(Number(hotel.location_id));
+                        if (!data) continue;
+                        if (data.ratingHistogram) hotel.rating_histogram = data.ratingHistogram;
+                        if (data.reviewSummary) {
+                            if (data.reviewSummary.rating != null) hotel.rating = hotel.rating ?? data.reviewSummary.rating;
+                            if (data.reviewSummary.count != null) hotel.reviews_count = hotel.reviews_count ?? data.reviewSummary.count;
+                        }
+                        if (data.subRatings) hotel.sub_ratings = data.subRatings;
+                    }
+                } catch (error) {
+                    log.warning(`Hotel GraphQL enrichment failed for ${startUrl}: ${error.message}`);
+                }
+            }
+
+            if (proxyUrl) {
+                try {
+                    await enrichHotelsViaBrowser(urlHotels, proxyUrl);
+                } catch (error) {
+                    log.warning(`Browser detail enrichment failed for ${startUrl}: ${error.message}`);
+                }
+            } else {
+                log.info('No proxy configured; skipping browser-based rich detail (address/lat-long/amenities). Set proxyConfiguration to enable.');
+            }
+
+            for (const hotel of urlHotels) {
+                pendingData.push(compactRecord(hotel));
+                if (pendingData.length >= DATASET_PUSH_BATCH_SIZE) {
+                    await Actor.pushData(pendingData);
+                    savedHotels += pendingData.length;
+                    pendingData = [];
+                }
+                if ((savedHotels + pendingData.length) >= resultsWanted) break;
             }
         }
 
@@ -613,9 +872,15 @@ async function runActor() {
         graphql_endpoint: TRIPADVISOR_GRAPHQL_ENDPOINT,
         query_id_by_geo: queryIdByGeo,
         endpoint_variant_by_geo: endpointVariantByGeo,
+        enrichment: {
+            graphql: ['rating_histogram', 'review_summary', 'sub_ratings'],
+            browser: proxyUrl ? 'enabled (address/lat-long/amenities/star-rating/phone)' : 'disabled (no proxy configured)',
+        },
         notes: [
             'Using TripAdvisor HPS shelves queries instead of the old list query id path.',
             'Pagination uses requestNumber and aggregates all working shelves strategies before stall detection.',
+            'Per-hotel GraphQL enrichment adds rating histogram, review summary, and sub-ratings.',
+            'Browser-based rich detail (address, lat/long, amenities, star rating, phone) runs only when a proxy is configured.',
             'startUrls are normalized from messy input shapes (arrays, objects, wrapped links, and mixed formatting).',
         ],
     });
