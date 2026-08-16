@@ -1,136 +1,69 @@
 {
   "actorSpecification": 1,
   "fields": {
-    "item_type": {
-      "title": "Item Type",
-      "type": "string",
-      "description": "Record category."
-    },
-    "source_url": {
-      "title": "Source URL",
-      "type": "string",
-      "description": "TripAdvisor page used for this listing batch."
-    },
-    "geo_id": {
-      "title": "Geo ID",
-      "type": "integer",
-      "description": "TripAdvisor city/geo identifier."
-    },
-    "hotel_result_key": {
-      "title": "Hotel Result Key",
-      "type": "string",
-      "description": "Unique listing key in result set."
-    },
-    "location_id": {
-      "title": "Location ID",
-      "type": "integer",
-      "description": "TripAdvisor hotel location identifier."
-    },
-    "hotel_name": {
-      "title": "Hotel Name",
-      "type": "string",
-      "description": "Hotel name."
-    },
-    "hotel_url": {
-      "title": "Hotel URL",
-      "type": "string",
-      "description": "Absolute hotel detail page URL."
-    },
-    "rating": {
-      "title": "Rating",
-      "type": "number",
-      "description": "Average review score."
-    },
-    "reviews_count": {
-      "title": "Reviews Count",
-      "type": "integer",
-      "description": "Total reviews for the listing."
-    },
-    "ranking_type_text": {
-      "title": "Ranking",
-      "type": "string",
-      "description": "Localized ranking text."
-    },
-    "provider_star_rating": {
-      "title": "Provider Star Rating",
-      "type": "number",
-      "description": "Hotel star rating field from provider metadata."
-    },
-    "accommodation_type": {
-      "title": "Accommodation Type",
-      "type": "string",
-      "description": "Type of stay (for example Hotel)."
-    },
-    "thumbnail_url": {
-      "title": "Thumbnail URL",
-      "type": "string",
-      "description": "Listing image URL."
-    },
-    "lowest_price": {
-      "title": "Lowest Price",
-      "type": "string",
-      "description": "Displayed lowest price text."
-    },
-    "offer_count": {
-      "title": "Offer Count",
-      "type": "integer",
-      "description": "Total offers found for listing."
-    },
-    "available_offer_count": {
-      "title": "Available Offer Count",
-      "type": "integer",
-      "description": "Count of currently available offers."
-    },
-    "full_address": {
-      "title": "Full Address",
-      "type": "string",
-      "description": "Best available full address."
-    },
-    "latitude": {
-      "title": "Latitude",
-      "type": "number",
-      "description": "Hotel latitude."
-    },
-    "longitude": {
-      "title": "Longitude",
-      "type": "number",
-      "description": "Hotel longitude."
-    },
-    "rating_histogram": {
-      "title": "Rating Histogram",
-      "type": "object",
-      "description": "Review count broken down by star rating (five/four/three/two/one)."
-    },
-    "sub_ratings": {
-      "title": "Sub Ratings",
-      "type": "object",
-      "description": "Category sub-ratings (cleanliness, location, rooms, service, sleepQuality, value)."
-    },
-    "amenities": {
-      "title": "Amenities",
-      "type": "array",
-      "description": "Hotel amenities extracted from the detail page.",
-      "items": {
-        "type": "string"
-      }
-    },
-    "hotel_description": {
-      "title": "Hotel Description",
-      "type": "string",
-      "description": "Hotel description from the detail page."
-    },
-    "phone": {
-      "title": "Phone",
-      "type": "string",
-      "description": "Hotel contact phone number."
-    }
+    "item_type": { "title": "Item Type", "type": "string", "description": "Record category." },
+    "source_url": { "title": "Source URL", "type": "string", "description": "TripAdvisor Hotels page used for the record." },
+    "geo_id": { "title": "Geo ID", "type": "integer", "description": "TripAdvisor destination identifier." },
+    "api_variant": { "title": "Source Variant", "type": "string", "description": "Source result family used for extraction." },
+    "listing_position_on_shelf": { "title": "Listing Position", "type": "integer", "description": "Position encountered in the destination result sequence." },
+    "hotel_result_key": { "title": "Hotel Result Key", "type": "string", "description": "Result identifier supplied for the listing." },
+    "location_id": { "title": "Location ID", "type": "integer", "description": "TripAdvisor hotel location identifier." },
+    "hotel_name": { "title": "Hotel Name", "type": "string", "description": "Hotel name." },
+    "hotel_url": { "title": "Hotel URL", "type": "string", "description": "Direct TripAdvisor hotel URL." },
+    "rating": { "title": "Rating", "type": "number", "description": "Average review score." },
+    "reviews_count": { "title": "Reviews Count", "type": "integer", "description": "Published review total." },
+    "rating_histogram": { "title": "Rating Histogram", "type": "object", "description": "Review totals by star rating." },
+    "sub_ratings": { "title": "Sub Ratings", "type": "object", "description": "Category-level hotel ratings." },
+    "review_snippet": { "title": "Review Snippet", "type": "object", "description": "Published review excerpt and metadata." },
+    "ranking_type_text": { "title": "Ranking", "type": "string", "description": "Localized destination ranking text." },
+    "ranking_position": { "title": "Ranking Position", "type": "integer", "description": "Numeric destination ranking." },
+    "ranking_out_of": { "title": "Ranking Total", "type": "integer", "description": "Property total represented by the ranking." },
+    "accommodation_type": { "title": "Accommodation Type", "type": "string", "description": "Published property type." },
+    "accommodation_category": { "title": "Accommodation Category", "type": "string", "description": "TripAdvisor accommodation category." },
+    "star_rating_tag_ids": { "title": "Star Rating Tags", "type": "array", "description": "Published star-classification tag identifiers.", "items": { "type": "integer" } },
+    "lowest_offer": { "title": "Lowest Offer", "type": "string", "description": "Compatibility value for the lowest displayed offer." },
+    "lowest_price": { "title": "Lowest Price", "type": "string", "description": "Lowest displayed price." },
+    "offer_count": { "title": "Offer Count", "type": "integer", "description": "Total offers found." },
+    "available_offer_count": { "title": "Available Offers", "type": "integer", "description": "Currently available offer count." },
+    "primary_offers": { "title": "Primary Offers", "type": "array", "description": "Primary price and provider details.", "items": { "type": "object" } },
+    "secondary_offers": { "title": "Secondary Offers", "type": "array", "description": "Additional price and provider details.", "items": { "type": "object" } },
+    "price_range": { "title": "Price Range", "type": "object", "description": "Published minimum and maximum price range." },
+    "price_range_usd": { "title": "USD Price Range", "type": "object", "description": "Published price range in US dollars." },
+    "full_address": { "title": "Full Address", "type": "string", "description": "Complete formatted hotel address." },
+    "street_1": { "title": "Street 1", "type": "string", "description": "Primary street address." },
+    "street_2": { "title": "Street 2", "type": "string", "description": "Secondary street address." },
+    "city": { "title": "City", "type": "string", "description": "Hotel city." },
+    "state": { "title": "State", "type": "string", "description": "Hotel state or region." },
+    "postal_code": { "title": "Postal Code", "type": "string", "description": "Hotel postal code." },
+    "country": { "title": "Country", "type": "string", "description": "Hotel country." },
+    "latitude": { "title": "Latitude", "type": "number", "description": "Hotel latitude." },
+    "longitude": { "title": "Longitude", "type": "number", "description": "Hotel longitude." },
+    "parent_geo_name": { "title": "Parent Geography", "type": "string", "description": "Parent destination name." },
+    "neighborhoods": { "title": "Neighborhoods", "type": "array", "description": "Containing areas or neighborhoods.", "items": { "type": "string" } },
+    "country_id": { "title": "Country ID", "type": "integer", "description": "TripAdvisor country identifier." },
+    "iso_country_code": { "title": "Country Code", "type": "string", "description": "ISO country code." },
+    "amenities": { "title": "Amenities", "type": "array", "description": "Highlighted hotel amenities.", "items": { "type": "string" } },
+    "amenity_details": { "title": "Amenity Details", "type": "array", "description": "Amenity names, tag identifiers, and icons.", "items": { "type": "object" } },
+    "hotel_description": { "title": "Hotel Description", "type": "string", "description": "Published property description or summary." },
+    "phone": { "title": "Phone", "type": "string", "description": "Published hotel telephone number." },
+    "email": { "title": "Email", "type": "string", "description": "Published hotel email address." },
+    "best_award_type": { "title": "Award Type", "type": "string", "description": "Active award type." },
+    "best_award_year": { "title": "Award Year", "type": "integer", "description": "Active award year." },
+    "thumbnail_url": { "title": "Thumbnail URL", "type": "string", "description": "Hotel image URL." },
+    "thumbnail_width": { "title": "Thumbnail Width", "type": "integer", "description": "Maximum source image width." },
+    "thumbnail_height": { "title": "Thumbnail Height", "type": "integer", "description": "Maximum source image height." },
+    "thumbnail_caption": { "title": "Thumbnail Caption", "type": "string", "description": "Published image caption." },
+    "thumbnail_lang": { "title": "Thumbnail Language", "type": "string", "description": "Image language code." },
+    "merchandising_labels": { "title": "Labels", "type": "array", "description": "Published listing labels.", "items": { "type": "string" } },
+    "special_offer": { "title": "Special Offer", "type": "object", "description": "Published hotel special offer." },
+    "is_sponsored": { "title": "Sponsored", "type": "boolean", "description": "Whether the encountered result was sponsored." },
+    "is_smb_or_kasm": { "title": "Property Account Flag", "type": "boolean", "description": "Published property account classification flag." }
   },
   "views": {
     "overview": {
       "title": "Overview",
       "transformation": {
         "fields": [
-          "item_type",
           "hotel_name",
           "location_id",
           "rating",
@@ -147,54 +80,17 @@
       "display": {
         "component": "table",
         "properties": {
-          "item_type": {
-            "label": "Type",
-            "format": "text"
-          },
-          "hotel_name": {
-            "label": "Hotel",
-            "format": "text"
-          },
-          "location_id": {
-            "label": "Location ID",
-            "format": "text"
-          },
-          "rating": {
-            "label": "Rating",
-            "format": "text"
-          },
-          "reviews_count": {
-            "label": "Reviews",
-            "format": "text"
-          },
-          "ranking_type_text": {
-            "label": "Ranking",
-            "format": "text"
-          },
-          "lowest_price": {
-            "label": "Lowest Price",
-            "format": "text"
-          },
-          "full_address": {
-            "label": "Address",
-            "format": "text"
-          },
-          "latitude": {
-            "label": "Latitude",
-            "format": "text"
-          },
-          "longitude": {
-            "label": "Longitude",
-            "format": "text"
-          },
-          "hotel_url": {
-            "label": "Hotel URL",
-            "format": "link"
-          },
-          "source_url": {
-            "label": "Source URL",
-            "format": "link"
-          }
+          "hotel_name": { "label": "Hotel", "format": "text" },
+          "location_id": { "label": "Location ID", "format": "text" },
+          "rating": { "label": "Rating", "format": "text" },
+          "reviews_count": { "label": "Reviews", "format": "text" },
+          "ranking_type_text": { "label": "Ranking", "format": "text" },
+          "lowest_price": { "label": "Lowest Price", "format": "text" },
+          "full_address": { "label": "Address", "format": "text" },
+          "latitude": { "label": "Latitude", "format": "text" },
+          "longitude": { "label": "Longitude", "format": "text" },
+          "hotel_url": { "label": "Hotel URL", "format": "link" },
+          "source_url": { "label": "Source URL", "format": "link" }
         }
       }
     }

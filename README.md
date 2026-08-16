@@ -1,98 +1,120 @@
 ## What does Tripadvisor Hotels Scraper do?
 
-Tripadvisor Hotels Scraper is a TripAdvisor hotel data extractor for collecting structured hotel listings from public city and hotel listing pages. Add one or more TripAdvisor Hotels URLs, choose the maximum number of results and pages, and receive a dataset with hotel names, ratings, review counts, prices, ranking context, awards, images, and location details when available.
+Tripadvisor Hotels Scraper collects structured hotel listings from public TripAdvisor destination pages. Add one or more TripAdvisor Hotels URLs, set the number of results you need, and receive hotel names, ratings, review totals, rankings, prices, offers, addresses, coordinates, amenities, descriptions, contact details, awards, images, and review summaries when published.
 
-The Actor is useful for travel market research, hotel competitor benchmarking, destination analysis, hospitality lead generation, and data enrichment. It accepts TripAdvisor URLs that contain a city or geographic identifier, including pages for destinations such as Istanbul, Dubai, London, Paris, or New York.
+The Actor is designed for travel market research, hotel competitor analysis, destination studies, hospitality lead generation, price comparison, and data enrichment. It follows hotel results beyond the first visible group, removes repeated sponsored or organic properties, and omits empty values from saved records.
 
 ## Why use Tripadvisor Hotels Scraper?
 
-- **Build hotel datasets quickly** - Collect listings from multiple destinations without manually copying hotel information.
-- **Compare hotel performance** - Analyze ratings, review volume, visible price signals, awards, and ranking positions across properties.
-- **Support destination research** - Organize hotels by source page, geographic identifier, shelf category, and position.
-- **Enrich hotel records** - Optional proxy configuration can provide additional address, coordinates, amenities, phone, description, star rating, and detail-page price fields when those values are published.
-- **Automate recurring collection** - Use Apify scheduling, API access, webhooks, dataset exports, and integrations for repeat research or monitoring workflows.
-- **Keep results usable** - Empty values are removed and duplicate hotel listings are filtered before records are saved.
+- **Collect larger destination datasets** - Gather results across multiple result pages instead of stopping after the first few hotel groups.
+- **Compare hotel performance** - Analyze ratings, review volume, destination ranking, awards, accommodation type, and visible pricing.
+- **Get property details in one record** - Receive addresses, coordinates, phone numbers, amenities, descriptions, neighborhoods, and photos when available.
+- **Study hotel offers** - Compare lowest prices, offer counts, providers, currencies, payment timing, and rate attributes.
+- **Keep data clean** - Duplicate hotels, null values, blank strings, invalid numeric ranges, and control characters are filtered before output.
+- **Automate recurring research** - Schedule runs, export datasets, use webhooks, or connect results to spreadsheets and other systems.
 
 ## What data can you extract from TripAdvisor?
 
-Each dataset item represents one hotel listing. Only non-empty values are saved, so optional fields may not appear in every record.
+Each dataset item represents one unique hotel. Optional fields are omitted when TripAdvisor does not publish a value.
 
-### Hotel listing fields
+### Hotel identity and review fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `item_type` | String | Record type, normally `hotel_shelf_listing`. |
-| `source_url` | String | TripAdvisor Hotels page used for the collection. |
-| `geo_id` | Integer | TripAdvisor geographic identifier for the destination. |
-| `location_id` | Integer | TripAdvisor identifier for the hotel listing. |
-| `hotel_name` | String | Hotel name. |
+| `item_type` | String | Record category, currently `hotel_shelf_listing`. |
+| `source_url` | String | TripAdvisor Hotels URL used for the result. |
+| `geo_id` | Integer | TripAdvisor destination identifier. |
+| `api_variant` | String | Source result family used for the record. |
+| `hotel_result_key` | String | Result identifier supplied for the listing. |
+| `location_id` | Integer | Unique TripAdvisor hotel identifier. |
+| `hotel_name` | String | Hotel or property name. |
 | `hotel_url` | String | Direct TripAdvisor hotel page URL. |
-| `rating` | Number | Average hotel rating when available. |
-| `reviews_count` | Integer | Total review count when available. |
-| `lowest_offer` | String | Lowest visible offer text from the listing. |
-| `best_award_type` | String | Best-of award type when provided. |
-| `best_award_year` | Integer | Year associated with the award. |
-| `thumbnail_url` | String | Hotel listing image URL. |
-| `thumbnail_width` | Integer | Available thumbnail width. |
-| `thumbnail_height` | Integer | Available thumbnail height. |
-| `thumbnail_caption` | String | Image caption when available. |
-| `thumbnail_lang` | String | Language code for thumbnail metadata when available. |
-| `parent_geo_name` | String | Parent geographic area when available. |
-
-### Ranking and location fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `shelf_type` | String | TripAdvisor shelf or collection category. |
-| `shelf_title` | String | Display title of the shelf when available. |
-| `shelf_is_complete` | Boolean | Whether the shelf indicates a complete result set. |
-| `shelf_position` | Integer | Position of the shelf on the source page. |
-| `shelf_see_all_url` | String | URL for viewing the full shelf when available. |
-| `listing_position_on_shelf` | Integer | Hotel position within its shelf. |
-| `ranking_type_text` | String | Ranking text shown on the hotel detail page when available. |
-| `full_address` | String | Full hotel address when published. |
-| `latitude` | Number | Hotel latitude when available. |
-| `longitude` | Number | Hotel longitude when available. |
-| `accommodation_type` | String | Accommodation type, such as `Hotel`, when available. |
-
-### Review and detail enrichment fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `rating_histogram` | Object | Review totals grouped into five-, four-, three-, two-, and one-star ratings. |
+| `rating` | Number | Average guest rating from 0 to 5. |
+| `reviews_count` | Integer | Published review total. |
+| `rating_histogram` | Object | Review totals grouped by five, four, three, two, and one stars. |
 | `sub_ratings` | Object | Category ratings such as cleanliness, location, rooms, service, sleep quality, and value. |
-| `provider_star_rating` | Number | Hotel star rating when available on the detail page. |
-| `amenities` | Array | Hotel amenities when published. |
-| `hotel_description` | String | Hotel description when published. |
-| `phone` | String | Hotel contact phone number when published. |
-| `lowest_price` | String | Detail-page price text when available. |
+| `review_snippet` | Object | A published review excerpt with title, rating, date, reviewer, and URL when available. |
+
+### Ranking, property, and location fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `listing_position_on_shelf` | Integer | Position encountered in the destination result sequence. |
+| `ranking_type_text` | String | Human-readable destination ranking. |
+| `ranking_position` | Integer | Numeric ranking position. |
+| `ranking_out_of` | Integer | Number of properties represented by the ranking context. |
+| `accommodation_type` | String | Property type, such as `Hotel`. |
+| `accommodation_category` | String | TripAdvisor accommodation category. |
+| `star_rating_tag_ids` | Array | Published star-rating classification tag identifiers. |
+| `full_address` | String | Complete formatted hotel address. |
+| `street_1` | String | Primary street address. |
+| `street_2` | String | Secondary street address when published. |
+| `city` | String | City name. |
+| `state` | String | State or region when published. |
+| `postal_code` | String | Postal code. |
+| `country` | String | Country name. |
+| `latitude` | Number | Latitude between -90 and 90. |
+| `longitude` | Number | Longitude between -180 and 180. |
+| `parent_geo_name` | String | Parent destination name. |
+| `neighborhoods` | Array | Neighborhoods or areas containing the hotel. |
+| `country_id` | Integer | TripAdvisor country identifier. |
+| `iso_country_code` | String | ISO country code. |
+
+### Price, offer, content, and media fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `lowest_price` | String | Lowest displayed price. |
+| `lowest_offer` | String | Compatibility field containing the lowest displayed offer. |
+| `offer_count` | Integer | Total number of offers found. |
+| `available_offer_count` | Integer | Number of currently available offers. |
+| `primary_offers` | Array | Offer details such as provider, price, currency, availability, and payment timing. |
+| `secondary_offers` | Array | Additional offer details when available. |
+| `price_range` | Object | Published minimum and maximum property price range. |
+| `price_range_usd` | Object | Published price range expressed in US dollars. |
+| `amenities` | Array | Highlighted amenity names. |
+| `amenity_details` | Array | Amenity names, tag identifiers, and icons. |
+| `hotel_description` | String | Published hotel description or property summary. |
+| `phone` | String | Hotel telephone number. |
+| `email` | String | Hotel email address when publicly supplied. |
+| `best_award_type` | String | Active award type. |
+| `best_award_year` | Integer | Active award year. |
+| `thumbnail_url` | String | Hotel image URL. |
+| `thumbnail_width` | Integer | Maximum source image width. |
+| `thumbnail_height` | Integer | Maximum source image height. |
+| `thumbnail_caption` | String | Image caption when published. |
+| `thumbnail_lang` | String | Image language code. |
+| `merchandising_labels` | Array | Labels such as sponsored placement or breakfast inclusion. |
+| `special_offer` | Object | Published hotel special-offer details. |
+| `is_sponsored` | Boolean | Whether the encountered result was sponsored. |
+| `is_smb_or_kasm` | Boolean | Published property account classification flag. |
 
 ## How to use Tripadvisor Hotels Scraper
 
 1. Open the Actor in Apify Console.
-2. Add one or more public TripAdvisor Hotels URLs to `startUrls`.
-3. Set `results_wanted` to the maximum number of hotel records you want.
-4. Set `max_pages` to control how many pages may be checked for each source URL.
-5. Enable Apify Proxy when you want the optional detail-page enrichment fields.
-6. Start the run and review the dataset preview.
+2. Add one or more public TripAdvisor Hotels destination URLs to `startUrls`.
+3. Set `results_wanted` to the maximum number of unique hotels to save.
+4. Set `max_pages` high enough for the requested result count.
+5. Optionally configure Apify Proxy for routing consistency.
+6. Start the run and inspect the dataset preview.
 7. Download the results or connect the dataset to your workflow.
 
-The easiest starting point is a canonical TripAdvisor Hotels city URL containing a geographic identifier, for example `https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html`.
+Use a canonical destination URL containing `-g<geoId>-`, for example `https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html`.
 
 ## Input Parameters
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `startUrls` | Array of strings | No | Istanbul sample URL | One or more TripAdvisor Hotels city or listing URLs. |
-| `results_wanted` | Integer | No | `20` | Maximum number of unique hotel listings to save across all input URLs. |
-| `max_pages` | Integer | No | `5` | Maximum number of pages to check for each source URL. |
-| `proxyConfiguration` | Object | No | Proxy disabled | Optional Apify Proxy settings. Enable a suitable proxy when additional detail-page fields are needed or the target page is difficult to access. |
+| `startUrls` | Array of strings | No | Istanbul sample URL | One or more TripAdvisor Hotels destination or listing URLs. |
+| `results_wanted` | Integer | No | `20` | Maximum number of unique hotel records to save across all URLs. |
+| `max_pages` | Integer | No | `5` | Maximum number of result pages to request for each URL. Each page normally contributes up to 30 new organic hotels plus possible sponsored placements. |
+| `proxyConfiguration` | Object | No | Proxy disabled | Optional Apify Proxy configuration for network routing. |
 
 ## Usage Examples
 
-### Basic city hotel extraction
+### Basic destination extraction
 
-Collect up to 20 hotel listings from one destination page.
+Collect up to 20 hotels from Istanbul using the default page limit.
 
 ```json
 {
@@ -104,9 +126,23 @@ Collect up to 20 hotel listings from one destination page.
 }
 ```
 
-### Collect hotels from multiple destinations
+### Collect more than the first hotel group
 
-Use multiple city URLs in one run and save up to 120 unique listings.
+Collect up to 100 unique hotels. A five-page limit is normally enough for this request, although available totals vary by destination.
+
+```json
+{
+  "startUrls": [
+    "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
+  ],
+  "results_wanted": 100,
+  "max_pages": 5
+}
+```
+
+### Compare multiple destinations
+
+Collect hotels from Istanbul and Dubai in one run.
 
 ```json
 {
@@ -114,21 +150,7 @@ Use multiple city URLs in one run and save up to 120 unique listings.
     "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html",
     "https://www.tripadvisor.com/Hotels-g295424-Dubai_Emirate_of_Dubai-Hotels.html"
   ],
-  "results_wanted": 120,
-  "max_pages": 10
-}
-```
-
-### Collect additional hotel detail fields
-
-Enable Apify Proxy when you want the Actor to attempt additional address, map, amenities, phone, description, star rating, ranking, and detail-page price fields.
-
-```json
-{
-  "startUrls": [
-    "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
-  ],
-  "results_wanted": 50,
+  "results_wanted": 150,
   "max_pages": 8,
   "proxyConfiguration": {
     "useApifyProxy": true,
@@ -141,109 +163,103 @@ Enable Apify Proxy when you want the Actor to attempt additional address, map, a
 
 ## Sample Output
 
-This example shows one realistic hotel record. Optional values appear only when TripAdvisor publishes them and the relevant enrichment is available.
+The following shortened example reflects the actual dataset structure. More optional fields may appear when published.
 
 ```json
 {
   "item_type": "hotel_shelf_listing",
   "source_url": "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html",
   "geo_id": 293974,
-  "shelf_type": "BEST_SELLER",
-  "shelf_title": "Best sellers",
-  "shelf_is_complete": false,
-  "shelf_position": 1,
-  "listing_position_on_shelf": 2,
-  "location_id": 4990603,
-  "hotel_name": "Golden Horn Bosphorus Hotel",
-  "hotel_url": "https://www.tripadvisor.com/Hotel_Review-g293974-d4990603-Reviews-Golden_Horn_Bosphorus_Hotel-Istanbul.html",
-  "lowest_offer": "$113",
+  "location_id": 8364987,
+  "hotel_name": "Romance Istanbul Hotel",
+  "hotel_url": "https://www.tripadvisor.com/Hotel_Review-g293974-d8364987-Reviews-Romance_Istanbul_Hotel-Istanbul.html",
   "rating": 5,
-  "reviews_count": 700,
-  "best_award_type": "BOTB",
-  "best_award_year": 2026,
-  "thumbnail_url": "https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2d/3c/fa/12/caption.jpg?w=1200&h=800&s=1",
-  "thumbnail_width": 6757,
-  "thumbnail_height": 5464,
-  "thumbnail_lang": "en",
-  "parent_geo_name": "Istanbul Province",
+  "reviews_count": 6752,
+  "ranking_type_text": "#4 of 2,619 hotels in Istanbul",
+  "ranking_position": 4,
+  "accommodation_type": "Hotel",
+  "lowest_price": "$121",
+  "offer_count": 4,
+  "available_offer_count": 3,
+  "full_address": "Hudavendigar Cd. No:5, Istanbul 34110 Türkiye",
+  "latitude": 41.01264,
+  "longitude": 28.977962,
+  "amenities": [
+    "Pool",
+    "Spa",
+    "Restaurant",
+    "Bar/Lounge"
+  ],
+  "hotel_description": "Charming hotel in Istanbul's old town with Ottoman-style decor and convenient access to historic sites.",
+  "phone": "+90 212 512 86 76",
   "rating_histogram": {
-    "five": 650,
-    "four": 35,
-    "three": 10,
-    "two": 3,
-    "one": 2
+    "five": 6120,
+    "four": 410,
+    "three": 120,
+    "two": 48,
+    "one": 54
   },
-  "sub_ratings": {
-    "cleanliness": 4.8,
-    "location": 4.7,
-    "rooms": 4.6,
-    "service": 4.8,
-    "sleepQuality": 4.7,
-    "value": 4.5
-  }
+  "is_sponsored": false
 }
 ```
 
 ## Tips for best results
 
-- Use complete, public TripAdvisor Hotels URLs. URLs containing `-g<geoId>-` are preferred for destination resolution.
-- Start with `results_wanted: 20` and a small `max_pages` value before running a larger collection.
-- Use separate source URLs for separate destinations so the dataset remains easy to filter and compare.
-- Enable Apify Proxy for larger runs or when you need optional hotel detail fields.
-- Expect some fields to be missing when the source page does not publish them. Missing fields do not necessarily indicate a failed run.
-- Review the dataset preview after the first run and report changed page behavior through the Actor’s Issues tab.
+- Use complete TripAdvisor Hotels URLs containing the destination geo ID.
+- Start with `results_wanted: 20` to review the available fields before requesting a larger dataset.
+- Allow roughly one page for every 25 to 30 unique hotels. Sponsored repeats can reduce the number of new records on a page.
+- Increase `max_pages` when requesting hundreds of hotels or when the destination contains repeated promoted listings.
+- Use separate source URLs for separate destinations so records are easy to group and compare.
+- Optional fields are omitted rather than saved as `null` when TripAdvisor does not publish them.
+- Report changed source behavior through the Actor's Issues tab with the input URL and run details.
 
 ## Integrations and export formats
 
-- **Apify API** - Start runs and read dataset items from your own application.
-- **Google Sheets** - Export hotel records for sorting, filtering, and comparison.
-- **Airtable** - Create a searchable hotel research database.
+- **Apify API** - Start runs and retrieve hotel datasets programmatically.
+- **Google Sheets** - Export records for filtering, comparison, and reporting.
+- **Airtable** - Build a searchable hotel research database.
 - **Webhooks** - Notify downstream systems when a run finishes.
-- **Make or Zapier** - Send new hotel data into no-code workflows.
-- **JSON, CSV, Excel, and XML** - Download results in formats suited to APIs, analysis, reporting, and system imports.
+- **Make or Zapier** - Send results into no-code workflows.
+- **JSON, CSV, Excel, and XML** - Download data in formats suited to analysis and system imports.
 
 ## Frequently Asked Questions
 
-### Can I scrape TripAdvisor hotels from multiple cities?
+### Can I collect more than 48 hotels from one destination?
 
-Yes. Add multiple city or listing URLs to `startUrls`; the Actor processes them in one run until `results_wanted` is reached.
+Yes. Set `results_wanted` above 48 and provide a sufficient `max_pages` value. The Actor follows successive result pages and removes repeated hotels before saving them.
 
-### What is the maximum number of hotel results?
+### Can I scrape hotels from multiple cities?
 
-The Actor accepts a positive `results_wanted` value and saves up to that number of unique hotel listings. The practical total also depends on the number of listings available from the submitted pages.
+Yes. Add multiple destination URLs to `startUrls`. The Actor processes them until it reaches the requested total or exhausts the configured page limits.
 
-### Does the Actor collect hotel reviews?
+### Why are some optional fields absent?
 
-No. This Actor collects hotel listing and property information, including review totals and rating summaries. Use a dedicated review collection Actor when you need individual guest review text.
+TripAdvisor does not publish every field for every hotel. Empty and null values are omitted so exported records remain clean.
 
-### Which fields require proxy configuration?
+### Does the Actor collect individual reviews?
 
-Core listing fields and rating summaries can be returned without a proxy. Address, coordinates, amenities, phone, description, provider star rating, ranking text, and detail-page price fields are optional and are more likely to be available when Apify Proxy is enabled.
+No. It collects hotel listings, review totals, rating summaries, sub-ratings, and an available review snippet. Use a dedicated reviews Actor for full individual review datasets.
 
 ### Can I export TripAdvisor hotel data to CSV or Excel?
 
-Yes. Apify datasets can be downloaded as CSV, Excel, JSON, XML, and other supported formats.
+Yes. Apify datasets support CSV, Excel, JSON, XML, and other export formats.
 
-### Can I schedule recurring hotel data collection?
+### Can I schedule recurring hotel collection?
 
-Yes. Create an Apify schedule to run the Actor hourly, daily, weekly, or at a custom interval, then send completed results to a dataset, webhook, or connected integration.
-
-### Why is a field missing from one hotel record?
-
-Optional fields depend on the information published for that hotel and the enrichment available during the run. The Actor removes empty values, so a field is omitted instead of saved as `null`.
+Yes. Create an Apify schedule to run hourly, daily, weekly, or at another interval, then send results to a dataset, webhook, or integration.
 
 ### Is it legal to scrape TripAdvisor data?
 
-You are responsible for complying with TripAdvisor’s terms, applicable laws, privacy requirements, and any restrictions on how collected data may be used. Collect and use public data only for legitimate purposes.
+You are responsible for complying with TripAdvisor's terms, applicable laws, privacy requirements, and restrictions on data use. Collect public data only for legitimate purposes.
 
 ## Related Actors
 
-- [Tripadvisor Reviews Scraper](https://apify.com/shahidirfan/tripadvisor-reviews-scraper) - Collect individual hotel reviews, ratings, guest feedback, and review metadata from TripAdvisor hotel pages.
-- [Agoda Hotels Scraper](https://apify.com/shahidirfan/agoda-hotels-scraper) - Collect hotel listings, prices, availability, ratings, review signals, and property details from Agoda for comparison with TripAdvisor data.
+- [Tripadvisor Reviews Scraper](https://apify.com/shahidirfan/tripadvisor-reviews-scraper) - Collect individual hotel reviews, ratings, guest feedback, and review metadata.
+- [Agoda Hotels Scraper](https://apify.com/shahidirfan/agoda-hotels-scraper) - Collect hotel listings, prices, availability, ratings, and property details from Agoda.
 
 ## Support
 
-For issues, feature requests, or changed TripAdvisor page behavior, use the Issues tab on the Actor page in Apify Console. Include the input URL, run details, and the missing or unexpected field so the problem can be investigated.
+For issues, feature requests, or changed TripAdvisor behavior, use the Issues tab on the Actor page. Include the input URL, run details, and the unexpected field or result count.
 
 ## Legal Notice
 

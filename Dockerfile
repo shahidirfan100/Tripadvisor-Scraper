@@ -4,7 +4,7 @@ COPY package*.json ./
 RUN npm --quiet set progress=false \
     && npm install --omit=dev --include=optional \
     && node -e "import('impit').then(m => console.log('impit OK:', Object.keys(m)))" \
-    && node -e "import('playwright').then(m => console.log('playwright OK:', Object.keys(m)))" \
+    && node -e "import('patchright').then(m => console.log('patchright OK:', Object.keys(m)))" \
     && rm -rf ~/.npm
 
 COPY . ./

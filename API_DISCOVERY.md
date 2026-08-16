@@ -3,137 +3,145 @@
 ## Target
 
 - Domain: `www.tripadvisor.com`
-- Listing page example: `https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html`
+- Listing page tested: `https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html`
+- Discovery date: 2026-08-16
 
-## Problem Observed
+## Existing Actor Audit
 
-- Previous list query IDs (`0ab60f652e82bad6`, `fba19361f0ea0116`) now fail with:
-  - `Cannot query field "marketingText" on type "HPS_WebHLMetaOffer". Did you mean "savingsText"?`
-- This indicates persisted query drift (backend schema evolved, old query documents became incompatible).
+The actor used two non-paginated hotel shelf operations:
 
-## Selected API (Working Replacement)
+- `32f2e254f7f08a0d` - `HPS_getUndatedHotelShelves`
+- `6504d9cf4c74d5ae` - `HPS_getHotelsHomeShelves`
+
+Changing `requestNumber` did not change either result set. Their union produced only about 46-48 unique hotels for Istanbul, so the actor could not honor larger `results_wanted` values.
+
+Existing output fields included hotel identifiers and URLs, name, rating, review count, visible offer text, award data, thumbnail data, shelf metadata, rating histogram, and sub-ratings. Optional browser detail extraction attempted to add address, coordinates, amenities, description, phone, star rating, ranking, and detail-page price.
+
+## Discovery Workflow
+
+### URLScan.io
+
+- Public scan search was available and checked first.
+- Recent useful hotel-list network captures were not available in public search results.
+- Submitting a new public scan returned `HTTP 401` because URLScan now requires an API key for scan submission in this environment.
+
+### Desktop, mobile, and app-style HTTP probes
+
+| Candidate | Header profile | Status/body | Expected JSON marker | Pagination | Decision |
+|---|---|---:|---|---|---|
+| Hotels page | Desktop Chrome | `403`, 775 bytes | Missing | N/A | Rejected as a bootstrap/data source |
+| Hotels page | iOS Safari | `200`, 1,297,183 bytes | No stable hydration marker | N/A | Rejected in favor of the richer JSON operation |
+| Hotels page | Android/okhttp | `200`, 1,603,786 bytes | No stable hydration marker | N/A | Rejected in favor of the richer JSON operation |
+| `/data/graphql/ids` | Header-only desktop/iOS/Android replay | `400`, empty body | Missing | Unknown | Rejected; browser-derived session/request recipe is required |
+| Old hotel list IDs | Impit Chrome impersonation | JSON schema error | Old list document references removed `marketingText` field | Offset/limit, but broken | Rejected |
+| Shelf query `32f2e254f7f08a0d` | Impit Chrome impersonation | JSON OK | `HPS_getUndatedHotelShelves` | `requestNumber` repeats same results | Fallback only |
+| Shelf query `6504d9cf4c74d5ae` | Impit Chrome impersonation | JSON OK | `HPS_getHotelsHomeShelves` | `requestNumber` repeats same results | Fallback only |
+| Hotel list query `f101de74ce917363` | Patchright capture, then Impit replay | JSON OK, 177-262 KB per tested page | `data.list.results` | Working `offset`/`limit` | **Selected** |
+
+### Patchright live-network capture
+
+Headless Chrome received a DataDome stub. Patchright with a persistent real-Chrome context (`channel: 'chrome'`, `headless: false`, `noViewport: true`) loaded the hotel listing application and exposed the current persisted list operation.
+
+The captured request used:
+
+- Endpoint: `POST https://www.tripadvisor.com/data/graphql/ids`
+- Persisted query ID: `f101de74ce917363`
+- Data path: `data.list.results`
+- Pagination variables: `offset`, `limit`
+- Page size observed: `30` organic results, with some sponsored insertions
+- The response includes `data.list.isComplete`, but live testing proved it is not a pagination terminal.
+
+## Selected API
 
 - Endpoint: `https://www.tripadvisor.com/data/graphql/ids`
 - Method: `POST`
-- Primary query id: `32f2e254f7f08a0d`
-- Primary data path: `HPS_getUndatedHotelShelves.shelves`
-- Fallback query id: `6504d9cf4c74d5ae`
-- Fallback data path: `HPS_getHotelsHomeShelves.shelves`
+- Query ID: `f101de74ce917363`
+- Auth: no account authentication; TripAdvisor session cookies and request headers are required
+- Pagination: `offset` increments by `limit` (verified at offsets `0`, `30`, `60`, and `90`)
+- Primary data path: `[0].data.list.results`
+- Transport: Impit with Chrome impersonation (`browser: 'chrome'`, `ignoreTlsErrors: true`)
+- Browser role: Patchright is an auto-healing fallback for discovering the current list query if the persisted ID rotates
 
-## Variables Used (Primary Query)
+### API score
 
-- `geoId`
-- `currency`
-- `pageviewId`
-- `sessionId`
-- `deviceType` (`DESKTOP`)
-- `locale` (`en-US`)
-- `requestCaller` (`Hotels`)
-- `requestNumber` (`0`)
+| Factor | Points |
+|---|---:|
+| Returns JSON directly | 30 |
+| More than 15 useful fields | 25 |
+| No account authentication | 20 |
+| Supports real pagination | 15 |
+| Matches and extends existing fields | 10 |
+| **Total** | **100** |
 
-## Field Coverage
+The score exceeds the required minimum of 50.
 
-Current mapping from shelf items includes:
+## Request Recipe
 
-- `location_id`, `hotel_name`, `hotel_url`
-- `lowest_offer`
-- `rating`, `reviews_count`
-- `best_award_type`, `best_award_year`
-- `thumbnail_url`, `thumbnail_caption`, `thumbnail_lang`
-- `shelf_type`, `shelf_title`, `shelf_see_all_url`, shelf/item positions
+1. Bootstrap the submitted TripAdvisor page with Impit.
+2. Reuse all response cookies on the GraphQL request when available.
+3. Send a random 180-character `x-requested-by` value for each request.
+4. Use the submitted listing URL as `referer` and `https://www.tripadvisor.com` as `origin`.
+5. Keep a stable `pageviewId` and `sessionId` across pages in one source-URL run.
+6. Increment `offset` by 30 and `requestNumber` by one.
+7. Stop at an empty page, repeated no-new-result pages, `max_pages`, or `results_wanted`.
 
-## Request Recipe (verified working via impit)
-
-Endpoint: `POST https://www.tripadvisor.com/data/graphql/ids`
-Body: JSON array of `{ variables, extensions: { preRegisteredQueryId } }`.
-Headers (all required; missing/bad ones => 403/empty):
+Required headers:
 
 - `content-type: application/json`
 - `origin: https://www.tripadvisor.com`
-- `referer: <startUrl>`  (e.g. `https://www.tripadvisor.com/Hotel_Review-g293974-d<id>-Istanbul.html`)
-- `x-requested-by: <random 180-char alnum string>`  (real browser sends a random tracking id, NOT the literal `tripadvisor.com`)
-- `cookie: <from bootstrap>`
+- `referer: <normalized start URL>`
+- `x-requested-by: <random 180-character value>`
+- `cookie: <bootstrap cookies>` when bootstrap supplied cookies
 
-Bootstrap: `GET https://www.tripadvisor.com/<any-page>` returns `HTTP 403` (DataDome challenge)
-**but still sets working session cookies** (`TAID`, `TASession`, ...). Reuse those cookies on the GraphQL call.
+## Available Fields
 
-### How impit bypasses the blocking
+The selected operation returns more data than both the old shelf feed and the former detail-page fallback:
 
-- `new Impit({ browser: 'chrome', ignoreTlsErrors: true })`
-  - `browser: 'chrome'` makes impit mimic Chrome's **TLS/JA3 fingerprint** (this is exactly what `curl_cffi` `impersonate="chrome"` does in the jios325 scraper — same technique). This is what gets GraphQL requests past DataDome.
-  - The `/data/graphql/ids` (persisted queries) layer is **asymmetric**: it is reachable without a proxy from a clean IP, whereas the **HTML pages** (`Hotel_Review`, `Hotels-gXXX`) are fully DataDome-challenged (403 stub) and need a residential proxy + headless browser to solve the JS challenge.
+- Identity: `hotelResultKey`, `locationId`, name, canonical hotel URL
+- Reviews: rating and review count
+- Ranking: localized category rank, rank number, and total properties
+- Location: latitude, longitude, parent geography, neighborhoods, country ID/code
+- Contact: full structured address and telephone
+- Property: accommodation category/type, star-rating tags, SMB/KASM flag
+- Content: generated property summary and review snippet
+- Awards: active-year award type and year
+- Media: thumbnail ID, caption, language, dynamic URL, dimensions
+- Amenities: highlighted amenity names, IDs, and icons
+- Pricing: price range, lowest price, offer counts, primary/secondary offers, provider, currency, base/display price, payment timing, mobile/member-rate flags
+- Merchandising: labels and special-offer metadata
 
-## Rich-Data Query Map (verified live)
+## Verified Pagination Outcome
 
-> ⚠️ Persisted query IDs **rotate**. IDs confirmed live on 2026-07-13 from this IP. Some that work in 2025/2026 blog repos now return `PersistedQueryNotFound` (e.g. typeahead `84b17ed122fbdbd4`, offers `1ad9fb68f3f0cdaf`, keywords `0ec4a283a4c8326d`). Treat IDs as potentially volatile; the working set below was the stable subset.
+Direct Impit replay returned:
 
-| Query ID | Input | Returns | Enrichment value |
-|---|---|---|---|
-| `32f2e254f7f08a0d` | geoId, currency, locale, deviceType | `HPS_getUndatedHotelShelves.shelves` | **Primary hotel LIST** |
-| `6504d9cf4c74d5ae` | geoId, currency, locale, deviceType | `HPS_getHotelsHomeShelves.shelves` | List fallback (different hotels) |
-| `b6d4e00c5b27f98e` | locationId | `locations[0].reviewAggregations.ratingCounts` + `reviewSummaryInfo[0].responseData` | **Rating histogram** (5/4/3/2/1 counts) + (rating, count) |
-| `6d1d0d458eddcc5f` | locationId | `hotelSubratingsData[0].subRatings` | **Sub-ratings**: cleanliness, location, rooms, service, sleepQuality, value (0-5) |
-| `9365c2244f5b46a6` | locationId, limit, offset, filters, sort | `ReviewsProxy_getReviewListPageForLocation` | Reviews (title/text/rating/date) |
-| `ef1a9f94012220d3` | locationId, currency, locale, limit, offset | review list | Reviews (alternate) |
-| `5a248f7d0220cca5` | locationId, albumId, photosLimit | `mediaAlbum`, `mediaAlbumPage.mediaList` | Photos |
-| `a74001171c4cc850` | locationId, offset, limit | `QuestionsAndAnswers_getQuestionsByLocations` | Tips / Q&A |
-| `6ba0d709c01afcf1` | locationId | `activeNotices` | Management notices |
-| `37f9b1acc4b3620f` | geoId | `locations[0].locationTimezoneId` | Geo timezone only (thin) |
+| Offset | HTTP | Raw results |
+|---:|---:|---:|
+| 0 | 200 | 37 |
+| 30 | 200 | 37 |
+| 60 | 200 | 30 |
+| 90 | 200 | 37 |
 
-### NOT available via GraphQL (live)
+Sponsored properties can repeat between pages, so records must be deduplicated by `location_id` (with URL/result-key fallbacks). The tested offsets produced enough distinct hotels to prove the previous 48-listing ceiling is removed.
 
-The full rich hotel object — **address, `latitude`, `longitude`, `hotelClass`/`starRating`, `amenities`, `description`, `phone`** — is **not** returned by any reachable persisted query. Per ScrapFly (2026) and webscraper.io prebuilt, this data is server-rendered into the **Hotel_Review HTML** as hidden web data (`aggregateRating` JSON-LD + amenity elements) and is **DataDome-protected**. To capture it you need a residential proxy + headless browser (Playwright/patchright) to pass the challenge, then parse the hidden data.
+`data.list.isComplete` was `true` on the first response even though offsets 30, 60, and 90 returned additional hotels. The actor therefore records no completion decision from this flag and uses empty/repeated pages as the reliable terminal condition.
 
-## Runtime Notes
+## Rejected Alternatives
 
-- Bootstrap page may return `HTTP 403` with challenge, but cookie bootstrap still allows GraphQL calls.
-- Shelf payload is geo-aware and stable for current schema.
-- This endpoint does not expose old list-page pagination (`offset/limit`) in the same shape; actor now collects from returned shelf buckets and deduplicates records.
+- The shelf operations remain useful only as a degraded fallback because their `requestNumber` value does not paginate.
+- The legacy list query IDs are unusable because their stored documents no longer match TripAdvisor's GraphQL schema.
+- HTML/DOM parsing is slower, more fragile, and unnecessary because the selected JSON response includes address, coordinates, amenities, descriptions, pricing, and contact data.
+- Per-hotel browser visits are unnecessary for normal extraction and would make larger runs too slow.
 
-## Deep Pagination Review (2026-06-01)
+## Auto-Healing Strategy
 
-### A. Legacy list pagination query IDs
+If the selected persisted query returns `PersistedQueryNotFound`, a schema error, or no `data.list.results` value:
 
-- Tested IDs: `0ab60f652e82bad6`, `fba19361f0ea0116`
-- Result: both execute but fail with schema error:
-  - `Cannot query field "marketingText" on type "HPS_WebHLMetaOffer". Did you mean "savingsText"?`
-- Conclusion: old `offset/limit` list operation is currently unusable.
+1. Launch Patchright using the high-security persistent Chrome pattern.
+2. Observe `/data/graphql/ids` requests while loading the submitted Hotels page.
+3. Select the request whose variables contain `offset`, `limit`, `geoId`, and `productId: "Hotels"`.
+4. Validate that its response contains `data.list.results`.
+5. Reuse the captured query ID and variable template for the remaining Impit requests.
 
-### B. Candidate query-id sweep
+If a DataDome challenge prevents Patchright from observing the request, inspect the public Hotels page JavaScript assets using the exact iOS Safari HTTP profile. The hotel-list bundle exposes a validator for `data.list.isComplete` and `data.list.results` beside the current 16-character persisted query ID. The discovered ID is still validated by an Impit request before any records are saved.
 
-- Extracted 31 candidate IDs from public scraper references and validated directly against `data/graphql/ids`.
-- Outcomes:
-  - Most candidates: `PersistedQueryNotFound`
-  - One live non-list query: `ef1a9f94012220d3` (`locationId`-required, not city-list pagination)
-  - Two live city-list-adjacent queries: `32f2e254f7f08a0d`, `6504d9cf4c74d5ae`
-
-### C. Request-number / caller matrix on live shelves queries
-
-- For `32f2e254f7f08a0d` with `requestCaller=Hotels`, `requestNumber` from `0..20`:
-  - always `3 shelves`, `22` unique hotels
-- For other callers (`HotelsList`, `HotelsFusion`, `Search`, `Hotel_Review`):
-  - `0` shelves
-- For `6504d9cf4c74d5ae`, `requestNumber` from `0..20`:
-  - always `1 shelf`, `25` unique hotels
-- Cross-query union (same geo):
-  - `22` (undated) + `25` (home) with `1` overlap = `46` unique hotels
-
-### D. URLScan status
-
-- Search API still works for listing scan metadata.
-- Detailed result retrieval and scan submission now require API key in this environment, so discovery relied on live GraphQL validation instead.
-
-## Final Endpoint Strategy
-
-- Keep using `https://www.tripadvisor.com/data/graphql/ids`.
-- Aggregate all successful shelves strategies per page pass:
-  - `HPS_getUndatedHotelShelves` (`32f2e254f7f08a0d`)
-  - `HPS_getHotelsHomeShelves` (`6504d9cf4c74d5ae`)
-- Deduplicate by `location_id` / URL.
-- Stop on repeated stall pages (no new records).
-
-### Verified outcome
-
-- With input `results_wanted=200`, `max_pages=8`, `geoId=293974`:
-  - before strategy aggregation: `22` unique hotels
-  - after strategy aggregation: `46` unique hotels
+No cookies, authorization values, or captured query IDs are written to logs or datasets.
