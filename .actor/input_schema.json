@@ -1,17 +1,74 @@
 {
   "title": "TripAdvisor Hotels Scraper",
-  "description": "Extract hotel listings from TripAdvisor Hotels city and listing URLs with paginated output.",
+  "description": "Extract hotel listings from TripAdvisor Hotels destination URLs with availability, occupancy, sorting, and paginated output.",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
     "startUrls": {
       "title": "TripAdvisor Hotels URLs",
       "type": "array",
-      "description": "One or more TripAdvisor Hotels city/listing URLs. Best format contains -g<geoId>- in the URL.",
+      "description": "One or more TripAdvisor Hotels destination/listing URLs. Best format contains -g<geoId>- in the URL.",
       "editor": "stringList",
       "prefill": [
         "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
       ]
+    },
+    "destination": {
+      "title": "Destination geo ID",
+      "type": "string",
+      "description": "Optional TripAdvisor destination geo ID. Paste digits only, for example 293974. When supplied, it overrides the geo ID in the URL; leave empty to use each URL's destination.",
+      "pattern": "^[1-9][0-9]*$",
+      "editor": "textfield"
+    },
+    "checkInDate": {
+      "title": "Check-in date",
+      "type": "string",
+      "description": "Optional stay check-in date in YYYY-MM-DD format. Use with checkOutDate to apply availability pricing context.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "editor": "datepicker"
+    },
+    "checkOutDate": {
+      "title": "Check-out date",
+      "type": "string",
+      "description": "Optional stay check-out date in YYYY-MM-DD format. It must be after checkInDate.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "editor": "datepicker"
+    },
+    "rooms": {
+      "title": "Rooms",
+      "type": "integer",
+      "description": "Optional number of rooms used for availability and pricing context.",
+      "minimum": 1,
+      "maximum": 20,
+      "editor": "number"
+    },
+    "guests": {
+      "title": "Guests",
+      "type": "integer",
+      "description": "Optional number of adult guests used for availability and pricing context.",
+      "minimum": 1,
+      "maximum": 50,
+      "editor": "number"
+    },
+    "sorting": {
+      "title": "Sorting",
+      "type": "string",
+      "description": "Order hotel results using a TripAdvisor-supported sort mode.",
+      "enum": [
+        "BEST_VALUE",
+        "PRICE_LOW_TO_HIGH",
+        "DISTANCE",
+        "POPULARITY"
+      ],
+      "enumTitles": [
+        "Best value",
+        "Price: low to high",
+        "Distance",
+        "Popularity"
+      ],
+      "default": "BEST_VALUE",
+      "prefill": "BEST_VALUE",
+      "editor": "select"
     },
     "results_wanted": {
       "title": "Maximum listings",
@@ -30,15 +87,6 @@
       "default": 5,
       "prefill": 5,
       "editor": "number"
-    },
-    "proxyConfiguration": {
-      "title": "Proxy configuration",
-      "type": "object",
-      "description": "Use Apify Proxy for better reliability on protected pages.",
-      "editor": "proxy",
-      "default": {
-        "useApifyProxy": false
-      }
     }
   },
   "required": [],

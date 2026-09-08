@@ -92,10 +92,10 @@ Each dataset item represents one unique hotel. Optional fields are omitted when 
 ## How to use Tripadvisor Hotels Scraper
 
 1. Open the Actor in Apify Console.
-2. Add one or more public TripAdvisor Hotels destination URLs to `startUrls`.
-3. Set `results_wanted` to the maximum number of unique hotels to save.
-4. Set `max_pages` high enough for the requested result count.
-5. Optionally configure Apify Proxy for routing consistency.
+2. Add one or more public TripAdvisor Hotels destination URLs to `startUrls`, or provide a `destination` geo ID.
+3. Optionally set a destination geo ID, stay dates, rooms, guests, and sorting.
+4. Set `results_wanted` to the maximum number of unique hotels to save.
+5. Set `max_pages` high enough for the requested result count.
 6. Start the run and inspect the dataset preview.
 7. Download the results or connect the dataset to your workflow.
 
@@ -106,9 +106,14 @@ Use a canonical destination URL containing `-g<geoId>-`, for example `https://ww
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `startUrls` | Array of strings | No | Istanbul sample URL | One or more TripAdvisor Hotels destination or listing URLs. |
+| `destination` | String | No | URL destination | Optional TripAdvisor destination geo ID. Paste digits only, such as `293974`; it overrides the destination in the submitted URLs. |
+| `checkInDate` | String | No | — | Optional check-in date in `YYYY-MM-DD` format. |
+| `checkOutDate` | String | No | — | Optional check-out date in `YYYY-MM-DD` format; must be after check-in. |
+| `rooms` | Integer | No | — | Optional number of rooms for availability and pricing context. |
+| `guests` | Integer | No | — | Optional number of adult guests for availability and pricing context. |
+| `sorting` | String | No | `BEST_VALUE` | Result order: `BEST_VALUE`, `PRICE_LOW_TO_HIGH`, `DISTANCE`, or `POPULARITY`. |
 | `results_wanted` | Integer | No | `20` | Maximum number of unique hotel records to save across all URLs. |
 | `max_pages` | Integer | No | `5` | Maximum number of result pages to request for each URL. Each page normally contributes up to 30 new organic hotels plus possible sponsored placements. |
-| `proxyConfiguration` | Object | No | Proxy disabled | Optional Apify Proxy configuration for network routing. |
 
 ## Usage Examples
 
@@ -122,9 +127,33 @@ Collect up to 20 hotels from Istanbul using the default page limit.
     "https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html"
   ],
   "results_wanted": 20,
+  "max_pages": 5,
+  "checkInDate": "2026-10-15",
+  "checkOutDate": "2026-10-18",
+  "rooms": 1,
+  "guests": 2,
+  "sorting": "BEST_VALUE"
+}
+```
+
+### Search with destination, occupancy, dates, and sorting
+
+A URL is optional when `destination` is provided. Paste the geo ID as digits in the `destination` field. This example searches destination geo ID `293974` for a two-night stay for two guests and orders results from the lowest price upward.
+
+```json
+{
+  "destination": "293974",
+  "checkInDate": "2026-11-10",
+  "checkOutDate": "2026-11-12",
+  "rooms": 1,
+  "guests": 2,
+  "sorting": "PRICE_LOW_TO_HIGH",
+  "results_wanted": 20,
   "max_pages": 5
 }
 ```
+
+The same search options were verified with `BEST_VALUE`, `DISTANCE`, and `POPULARITY` sorting. Use a complete check-in/check-out pair; checkout must be later than check-in.
 
 ### Collect more than the first hotel group
 
@@ -152,12 +181,7 @@ Collect hotels from Istanbul and Dubai in one run.
   ],
   "results_wanted": 150,
   "max_pages": 8,
-  "proxyConfiguration": {
-    "useApifyProxy": true,
-    "apifyProxyGroups": [
-      "RESIDENTIAL"
-    ]
-  }
+  "sorting": "POPULARITY"
 }
 ```
 
@@ -207,6 +231,8 @@ The following shortened example reflects the actual dataset structure. More opti
 
 - Use complete TripAdvisor Hotels URLs containing the destination geo ID.
 - Start with `results_wanted: 20` to review the available fields before requesting a larger dataset.
+- Use both check-in and check-out dates when you want date-aware offer context; checkout must be later than check-in.
+- Set rooms and guests together when comparing availability for a specific party size.
 - Allow roughly one page for every 25 to 30 unique hotels. Sponsored repeats can reduce the number of new records on a page.
 - Increase `max_pages` when requesting hundreds of hotels or when the destination contains repeated promoted listings.
 - Use separate source URLs for separate destinations so records are easy to group and compare.
@@ -231,6 +257,10 @@ Yes. Set `results_wanted` above 48 and provide a sufficient `max_pages` value. T
 ### Can I scrape hotels from multiple cities?
 
 Yes. Add multiple destination URLs to `startUrls`. The Actor processes them until it reaches the requested total or exhausts the configured page limits.
+
+### Do the date, room, guest, and sorting options work together?
+
+Yes. The Actor passes the selected dates and occupancy to the hotel search and supports `BEST_VALUE`, `PRICE_LOW_TO_HIGH`, `DISTANCE`, and `POPULARITY` sorting modes.
 
 ### Why are some optional fields absent?
 

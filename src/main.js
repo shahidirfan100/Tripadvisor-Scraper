@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import { Actor, log } from 'apify';
-import { gotScraping } from 'got-scraping';
 import { Impit } from 'impit';
 import { chromium } from 'patchright';
 
@@ -17,10 +16,21 @@ const DEFAULT_RESULTS_WANTED = 20;
 const LIST_PAGE_SIZE = 30;
 const MAX_PAGES_LIMIT = 200;
 const MAX_START_URLS = 10000;
+const MAX_ROOMS = 20;
+const MAX_GUESTS = 50;
+const MAX_CHILDREN = 20;
 const PAGE_STALL_THRESHOLD = 2;
 const REQUEST_TIMEOUT_MS = 60000;
 const BROWSER_DISCOVERY_TIMEOUT_MS = 45000;
 const RETRYABLE_STATUS_CODES = new Set([408, 413, 429, 500, 502, 503, 504, 521, 522, 524]);
+
+const DEFAULT_SORT = 'BEST_VALUE';
+const SUPPORTED_SORTS = new Set([
+    'BEST_VALUE',
+    'PRICE_LOW_TO_HIGH',
+    'DISTANCE',
+    'POPULARITY',
+]);
 
 const DEFAULT_LIST_FILTERS = {
     selectTravelersChoiceWinner: false,
@@ -279,13 +289,23 @@ function collectUrlCandidates(value, output, depth = 0) {
     }
 }
 
-function normalizeStartUrls(input) {
+function normalizeDestinationGeoId(value) {
+    if (value === undefined || value === null || value === '') return undefined;
+    const numericValue = Number(value);
+    if (Number.isInteger(numericValue) && numericValue > 0) return numericValue;
+    return extractGeoIdFromUrl(value);
+}
+
+function normalizeStartUrls(input, destinationGeoId) {
     const candidates = [];
     collectUrlCandidates(input?.startUrls, candidates);
     collectUrlCandidates(input?.start_urls, candidates);
     collectUrlCandidates(input?.startUrl, candidates);
     collectUrlCandidates(input?.url, candidates);
     collectUrlCandidates(input?.urls, candidates);
+    if (!candidates.length && destinationGeoId) {
+        candidates.push(`https://www.tripadvisor.com/Hotels-g${destinationGeoId}-Hotels.html`);
+    }
     if (!candidates.length) candidates.push(DEFAULT_START_URL);
 
     const normalized = [];
@@ -310,20 +330,98 @@ async function readJsonFileIfExists(filePath) {
     }
 }
 
-function buildListVariables({ geoId, offset, requestNumber, pageviewId, sessionId, template = {} }) {
+function formatDateAsIso(date) {
+    return date.toISOString().slice(0, 10);
+}
+
+function getDefaultTravelDates() {
+    const checkIn = new Date();
+    checkIn.setUTCHours(0, 0, 0, 0);
+    checkIn.setUTCDate(checkIn.getUTCDate() + 1);
+    const checkOut = new Date(checkIn);
+    checkOut.setUTCDate(checkOut.getUTCDate() + 1);
+    return {
+        checkInDate: formatDateAsIso(checkIn),
+        checkOutDate: formatDateAsIso(checkOut),
+    };
+}
+
+function normalizeDate(value) {
+    const date = sanitizeString(value);
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || formatDateAsIso(parsed) !== date) return undefined;
+    return date;
+}
+
+function normalizeChildrenAges(value) {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((age) => validInteger(age, 0))
+        .filter((age) => age !== undefined && age <= 17)
+        .slice(0, MAX_CHILDREN);
+}
+
+function buildTravelInfo(input) {
+    const rawCheckInDate = input.checkInDate ?? input.check_in;
+    const rawCheckOutDate = input.checkOutDate ?? input.check_out;
+    const checkInDate = normalizeDate(rawCheckInDate);
+    const checkOutDate = normalizeDate(rawCheckOutDate);
+    const hasDateInput = rawCheckInDate !== undefined || rawCheckOutDate !== undefined;
+    const hasValidDateRange = checkInDate && checkOutDate && checkOutDate > checkInDate;
+    const rooms = toPositiveInteger(input.rooms, undefined, MAX_ROOMS);
+    const guests = toPositiveInteger(input.guests ?? input.adults, undefined, MAX_GUESTS);
+    const childrenAges = normalizeChildrenAges(input.childrenAges ?? input.childAges);
+    const hasOccupancyInput = rooms !== undefined || guests !== undefined || childrenAges.length > 0;
+
+    if (!hasDateInput && !hasOccupancyInput) return undefined;
+    if (hasDateInput && !hasValidDateRange) {
+        log.warning('Ignoring the date filter because checkInDate/checkOutDate must be valid YYYY-MM-DD dates with checkout after check-in.');
+    }
+
+    const defaultDates = getDefaultTravelDates();
+    return {
+        usedDefaultDates: !hasValidDateRange,
+        checkInDate: hasValidDateRange ? checkInDate : defaultDates.checkInDate,
+        checkOutDate: hasValidDateRange ? checkOutDate : defaultDates.checkOutDate,
+        rooms: rooms || 1,
+        adults: guests || 2,
+        childrenAges,
+    };
+}
+
+function normalizeSort(value) {
+    const requested = sanitizeString(value);
+    if (!requested) return DEFAULT_SORT;
+    const normalized = requested.toUpperCase().replace(/[\s-]+/g, '_');
+    if (SUPPORTED_SORTS.has(normalized)) return normalized;
+    log.warning(`Unsupported sorting value "${requested}"; using ${DEFAULT_SORT}.`);
+    return DEFAULT_SORT;
+}
+
+function buildListVariables({
+    geoId,
+    offset,
+    requestNumber,
+    pageviewId,
+    sessionId,
+    travelInfo,
+    sorting,
+    template = {},
+}) {
     return {
         ...template,
         geoId,
         blenderId: template.blenderId ?? null,
         boundingBox: template.boundingBox ?? null,
         centerAndRadius: template.centerAndRadius ?? null,
-        travelInfo: template.travelInfo ?? null,
+        travelInfo: travelInfo ?? null,
         currency: template.currency || DEFAULT_CURRENCY,
         pricingMode: template.pricingMode ?? null,
         filters: { ...DEFAULT_LIST_FILTERS, ...(template.filters || {}) },
         offset,
         limit: LIST_PAGE_SIZE,
-        sort: template.sort || 'BEST_VALUE',
+        sort: sorting || DEFAULT_SORT,
         clientType: 'DESKTOP',
         loadMapSpecificData: false,
         viewType: 'LIST',
@@ -396,6 +494,8 @@ async function fetchHotelListPage({
     sessionId,
     queryId,
     variablesTemplate,
+    travelInfo,
+    sorting,
 }) {
     const variables = buildListVariables({
         geoId,
@@ -403,6 +503,8 @@ async function fetchHotelListPage({
         requestNumber,
         pageviewId,
         sessionId,
+        travelInfo,
+        sorting,
         template: variablesTemplate,
     });
     const response = await postGraphql({
@@ -501,27 +603,15 @@ async function discoverHotelListOperation({ startUrl, proxyUrl }) {
     }
 }
 
-async function discoverHotelListQueryFromAssets(startUrl) {
+async function discoverHotelListQueryFromAssets({ client, startUrl }) {
     log.warning('Patchright discovery was challenged. Checking the public Hotels page assets.');
-    const iosHeaders = {
-        'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 '
-            + '(KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
-        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'accept-language': 'en-US,en;q=0.9',
-        'sec-fetch-site': 'none',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-user': '?1',
-        'sec-fetch-dest': 'document',
-    };
-    const pageResponse = await gotScraping.get(startUrl, {
-        headers: iosHeaders,
-        useHeaderGenerator: false,
-        http2: false,
-        timeout: { request: REQUEST_TIMEOUT_MS },
-        retry: { limit: 3 },
-    });
+    const pageResponse = await fetchWithRetry(client, startUrl, {}, 'Hotels asset page');
+    if (pageResponse.status >= 400) {
+        throw new Error(`Hotels asset page returned HTTP ${pageResponse.status}.`);
+    }
+    const pageBody = await pageResponse.text();
     const scriptUrls = [...new Set(
-        [...pageResponse.body.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)]
+        [...pageBody.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)]
             .map((match) => new URL(match[1], startUrl).href),
     )];
     if (!scriptUrls.length) throw new Error('No script assets were found on the Hotels page.');
@@ -535,16 +625,11 @@ async function discoverHotelListQueryFromAssets(startUrl) {
         const batch = scriptUrls.slice(index, index + 8);
         const candidates = await Promise.all(batch.map(async (scriptUrl) => {
             try {
-                const response = await gotScraping.get(scriptUrl, {
-                    headers: iosHeaders,
-                    useHeaderGenerator: false,
-                    http2: false,
-                    throwHttpErrors: false,
-                    timeout: { request: REQUEST_TIMEOUT_MS },
-                    retry: { limit: 2 },
-                });
+                const response = await fetchWithRetry(client, scriptUrl, {}, `Hotel asset ${index + 1}`);
+                if (response.status >= 400) return undefined;
+                const responseBody = await response.text();
                 for (const pattern of queryPatterns) {
-                    const queryId = response.body.match(pattern)?.[1];
+                    const queryId = responseBody.match(pattern)?.[1];
                     if (queryId) return queryId;
                 }
             } catch {
@@ -772,10 +857,16 @@ async function runActor() {
         log.info('Runtime input is empty. Using INPUT.json fallback values.');
     }
 
-    const startUrls = normalizeStartUrls(input);
+    const destinationGeoId = normalizeDestinationGeoId(input.destination);
+    if (input.destination !== undefined && !destinationGeoId) {
+        log.warning('The destination filter must be a positive TripAdvisor geo ID or a TripAdvisor URL containing a geo ID. Using the URL destination instead.');
+    }
+    const startUrls = normalizeStartUrls(input, destinationGeoId);
     const resultsWanted = toPositiveInteger(input.results_wanted, DEFAULT_RESULTS_WANTED);
     const maxPages = toPositiveInteger(input.max_pages, DEFAULT_MAX_PAGES, MAX_PAGES_LIMIT);
-    log.info(`Start run | urls=${startUrls.length} | target=${resultsWanted} | max_pages=${maxPages}`);
+    const travelInfo = buildTravelInfo(input);
+    const sorting = normalizeSort(input.sorting ?? input.sort);
+    log.info(`Start run | urls=${startUrls.length} | target=${resultsWanted} | max_pages=${maxPages} | sort=${sorting}`);
 
     let proxyUrl;
     if (input.proxyConfiguration) {
@@ -813,7 +904,7 @@ async function runActor() {
             log.warning(`Session bootstrap failed; trying the JSON source directly: ${error.message}`);
         }
 
-        const geoId = extractGeoIdFromUrl(startUrl) || extractGeoIdFromUrl(session.resolvedUrl);
+        const geoId = destinationGeoId || extractGeoIdFromUrl(startUrl) || extractGeoIdFromUrl(session.resolvedUrl);
         if (!geoId) {
             log.warning(`Skipping URL because its TripAdvisor geo ID could not be resolved: ${startUrl}`);
             continue;
@@ -840,6 +931,8 @@ async function runActor() {
                     sessionId,
                     queryId,
                     variablesTemplate,
+                    travelInfo,
+                    sorting,
                 });
             } catch (error) {
                 if (browserDiscoveryUsed) throw error;
@@ -850,7 +943,7 @@ async function runActor() {
                 } catch (browserError) {
                     log.warning(`Patchright discovery did not complete: ${browserError.message}`);
                     discovered = {
-                        queryId: await discoverHotelListQueryFromAssets(startUrl),
+                        queryId: await discoverHotelListQueryFromAssets({ client, startUrl }),
                         variablesTemplate: {},
                         cookieHeader,
                     };
@@ -870,6 +963,8 @@ async function runActor() {
                     sessionId,
                     queryId,
                     variablesTemplate,
+                    travelInfo,
+                    sorting,
                 });
             }
 

@@ -93,6 +93,16 @@ Required headers:
 - `x-requested-by: <random 180-character value>`
 - `cookie: <bootstrap cookies>` when bootstrap supplied cookies
 
+## Verified Listing Filters
+
+The selected list operation accepts these runtime inputs without changing the output schema:
+
+- `destination`: TripAdvisor destination geo ID. When provided, it overrides the geo ID read from each source URL; when no URL is supplied, the actor builds a canonical Hotels URL from this ID.
+- `travelInfo`: `{ checkInDate, checkOutDate, rooms, adults, childrenAges, usedDefaultDates }`. Dates use `YYYY-MM-DD`; the actor sends default next-day dates only when a travel filter is requested without a complete valid date range.
+- `sort`: verified values are `BEST_VALUE`, `PRICE_LOW_TO_HIGH`, `DISTANCE`, and `POPULARITY`.
+
+Direct request checks returned hotel results for all four sort values. Unsupported values are normalized to `BEST_VALUE` with a warning rather than sent to GraphQL.
+
 ## Available Fields
 
 The selected operation returns more data than both the old shelf feed and the former detail-page fallback:

@@ -5,9 +5,8 @@
   "type": "module",
   "dependencies": {
     "apify": "^3.7.2",
-    "crawlee": "^3.16.0",
-    "got-scraping": "^4.2.1",
-    "impit": "^0.14.3",
+    "crawlee": "^3.18.1",
+    "impit": "^0.14.4",
     "patchright": "^1.60.0"
   },
   "devDependencies": {
