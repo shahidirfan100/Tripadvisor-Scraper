@@ -87,6 +87,18 @@
       "default": 5,
       "prefill": 5,
       "editor": "number"
+    },
+    "proxyConfiguration": {
+      "title": "Proxy configuration",
+      "type": "object",
+      "description": "Use Apify Residential Proxy by default for better reliability on protected pages.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": [
+          "RESIDENTIAL"
+        ]
+      }
     }
   },
   "required": [],

@@ -7,7 +7,11 @@ import { chromium } from 'patchright';
 
 const DEFAULT_START_URL = 'https://www.tripadvisor.com/Hotels-g293974-Istanbul-Hotels.html';
 const TRIPADVISOR_GRAPHQL_ENDPOINT = 'https://www.tripadvisor.com/data/graphql/ids';
-const HOTEL_LIST_QUERY_ID = process.env.TRIPADVISOR_LIST_QUERY_ID || 'f101de74ce917363';
+const CONFIGURED_HOTEL_LIST_QUERY_ID = process.env.TRIPADVISOR_LIST_QUERY_ID;
+const HOTEL_LIST_QUERY_ID = CONFIGURED_HOTEL_LIST_QUERY_ID || 'f101de74ce917363';
+const HOTEL_LIST_QUERY_CACHE_STORE = 'tripadvisor-hotels-scraper-cache';
+const HOTEL_LIST_QUERY_CACHE_KEY = 'CURRENT_HOTEL_LIST_QUERY';
+const MAX_QUERY_RECOVERY_ATTEMPTS = 2;
 const RATING_HISTOGRAM_QUERY_ID = 'b6d4e00c5b27f98e';
 const SUBRATINGS_QUERY_ID = '6d1d0d458eddcc5f';
 const DEFAULT_CURRENCY = 'USD';
@@ -327,6 +331,43 @@ async function readJsonFileIfExists(filePath) {
     } catch (error) {
         if (error?.code !== 'ENOENT') log.warning(`Could not read ${filePath}: ${error.message}`);
         return {};
+    }
+}
+
+function isValidHotelListQueryId(value) {
+    return typeof value === 'string' && /^[0-9a-f]{16}$/i.test(value);
+}
+
+async function loadCachedHotelListQueryId() {
+    if (CONFIGURED_HOTEL_LIST_QUERY_ID) return undefined;
+
+    try {
+        const store = await Actor.openKeyValueStore(HOTEL_LIST_QUERY_CACHE_STORE);
+        const cached = await store.getValue(HOTEL_LIST_QUERY_CACHE_KEY);
+        const queryId = typeof cached === 'object' ? cached?.queryId : cached;
+        if (isValidHotelListQueryId(queryId)) {
+            log.info('Loaded the cached hotel-list operation.');
+            return queryId;
+        }
+    } catch (error) {
+        log.warning(`Hotel-list operation cache unavailable; using the configured query: ${error.message}`);
+    }
+
+    return undefined;
+}
+
+async function cacheHotelListQueryId(queryId) {
+    if (CONFIGURED_HOTEL_LIST_QUERY_ID || !isValidHotelListQueryId(queryId)) return;
+
+    try {
+        const store = await Actor.openKeyValueStore(HOTEL_LIST_QUERY_CACHE_STORE);
+        await store.setValue(HOTEL_LIST_QUERY_CACHE_KEY, {
+            queryId,
+            updatedAt: new Date().toISOString(),
+        });
+        log.info('Cached the refreshed hotel-list operation for the next run.');
+    } catch (error) {
+        log.warning(`Could not cache the refreshed hotel-list operation: ${error.message}`);
     }
 }
 
@@ -878,7 +919,8 @@ async function runActor() {
         }
     }
 
-    let queryId = HOTEL_LIST_QUERY_ID;
+    const cachedQueryId = await loadCachedHotelListQueryId();
+    let queryId = CONFIGURED_HOTEL_LIST_QUERY_ID || cachedQueryId || HOTEL_LIST_QUERY_ID;
     let variablesTemplate = {};
     let browserDiscoveryUsed = false;
     const seenHotels = new Set();
@@ -935,37 +977,56 @@ async function runActor() {
                     sorting,
                 });
             } catch (error) {
-                if (browserDiscoveryUsed) throw error;
                 log.warning(`Direct list operation failed: ${error.message}`);
-                let discovered;
-                try {
-                    discovered = await discoverHotelListOperation({ startUrl, proxyUrl });
-                } catch (browserError) {
-                    log.warning(`Patchright discovery did not complete: ${browserError.message}`);
-                    discovered = {
-                        queryId: await discoverHotelListQueryFromAssets({ client, startUrl }),
-                        variablesTemplate: {},
-                        cookieHeader,
-                    };
+                let recoveryError = error;
+
+                for (let recoveryAttempt = 1; recoveryAttempt <= MAX_QUERY_RECOVERY_ATTEMPTS; recoveryAttempt++) {
+                    try {
+                        let discovered;
+                        try {
+                            discovered = await discoverHotelListOperation({ startUrl, proxyUrl });
+                        } catch (browserError) {
+                            log.warning(`Patchright discovery did not complete: ${browserError.message}`);
+                            discovered = {
+                                queryId: await discoverHotelListQueryFromAssets({ client, startUrl }),
+                                variablesTemplate: {},
+                                cookieHeader,
+                            };
+                        }
+
+                        const recoveredCookieHeader = discovered.cookieHeader || cookieHeader;
+                        const recoveredList = await fetchHotelListPage({
+                            client,
+                            cookieHeader: recoveredCookieHeader,
+                            startUrl,
+                            geoId,
+                            offset,
+                            requestNumber: pageIndex + 1,
+                            pageviewId,
+                            sessionId,
+                            queryId: discovered.queryId,
+                            variablesTemplate: discovered.variablesTemplate,
+                            travelInfo,
+                            sorting,
+                        });
+
+                        browserDiscoveryUsed = true;
+                        queryId = discovered.queryId;
+                        variablesTemplate = discovered.variablesTemplate;
+                        cookieHeader = recoveredCookieHeader;
+                        list = recoveredList;
+                        await cacheHotelListQueryId(queryId);
+                        recoveryError = undefined;
+                        break;
+                    } catch (discoveryError) {
+                        recoveryError = discoveryError;
+                        if (recoveryAttempt < MAX_QUERY_RECOVERY_ATTEMPTS) {
+                            log.warning(`Hotel-list operation recovery attempt ${recoveryAttempt} failed; retrying discovery.`);
+                        }
+                    }
                 }
-                browserDiscoveryUsed = true;
-                queryId = discovered.queryId;
-                variablesTemplate = discovered.variablesTemplate;
-                cookieHeader = discovered.cookieHeader || cookieHeader;
-                list = await fetchHotelListPage({
-                    client,
-                    cookieHeader,
-                    startUrl,
-                    geoId,
-                    offset,
-                    requestNumber: pageIndex + 1,
-                    pageviewId,
-                    sessionId,
-                    queryId,
-                    variablesTemplate,
-                    travelInfo,
-                    sorting,
-                });
+
+                if (recoveryError) throw recoveryError;
             }
 
             processedPages += 1;
